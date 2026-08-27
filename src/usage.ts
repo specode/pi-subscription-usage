@@ -8,7 +8,6 @@ import {
 	awaitWithDeadline,
 	errorMessage,
 	isAbortError,
-	isStaleContextError,
 	modelIdentity,
 	UsageCache,
 } from "./core.ts";
@@ -91,7 +90,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			ctx.ui.setStatus(STATUS_KEY, value);
 			return true;
 		} catch (error) {
-			if (isStaleContextError(error)) return false;
+			if (!sessionActive) return false;
 			throw error;
 		}
 	}
@@ -161,13 +160,13 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		let auth: ResolvedUsageAuth | undefined;
 		try {
 			auth = await awaitWithDeadline(
-				resolveUsageAuth(ctx, adapter),
+				() => resolveUsageAuth(ctx, adapter),
 				signal,
 				QUERY_TIMEOUT_MS,
 				`resolving ${adapter.displayName} authentication`,
 			);
 		} catch (error) {
-			if (isAbortError(error) || isStaleContextError(error)) throw error;
+			if (isAbortError(error) || !sessionActive) throw error;
 			return {
 				state: {
 					providerId: adapter.id,
@@ -231,7 +230,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				fingerprint: auth.fingerprint,
 			};
 		} catch (error) {
-			if (isAbortError(error) || isStaleContextError(error)) throw error;
+			if (isAbortError(error) || !sessionActive) throw error;
 			const message = errorMessage(error);
 			failureBackoff.set(failureKey, {
 				until: Date.now() + FAILURE_BACKOFF_MS,
@@ -283,7 +282,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		if (!adapter) return false;
 		try {
 			const auth = await awaitWithDeadline(
-				resolveUsageAuth(ctx, adapter),
+				() => resolveUsageAuth(ctx, adapter),
 				signal,
 				QUERY_TIMEOUT_MS,
 				`revalidating ${adapter.displayName} authentication`,
@@ -293,7 +292,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				auth?.fingerprint === outcome.fingerprint
 			);
 		} catch (error) {
-			if (isAbortError(error) || isStaleContextError(error)) throw error;
+			if (isAbortError(error) || !sessionActive) throw error;
 			return false;
 		}
 	}
@@ -358,7 +357,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		force: boolean,
 	): void {
 		void refreshCurrentStatus(ctx, model, force).catch((error) => {
-			if (isAbortError(error) || isStaleContextError(error)) return;
+			if (isAbortError(error) || !sessionActive) return;
 			emitUnavailableUsage();
 			safeSetStatus(ctx, "usage error");
 		});
@@ -381,7 +380,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		}
 		const summaryCount = codexResetCount(current.outcome.state.report) ?? 0;
 		let auth = await awaitWithDeadline(
-			resolveCodexResetAuth(ctx),
+			() => resolveCodexResetAuth(ctx),
 			controller.signal,
 			QUERY_TIMEOUT_MS,
 			"resolving Codex reset authentication",
@@ -423,7 +422,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		const requestId = randomUUID();
 		while (!controller.signal.aborted) {
 			auth = await awaitWithDeadline(
-				resolveCodexResetAuth(ctx),
+				() => resolveCodexResetAuth(ctx),
 				controller.signal,
 				QUERY_TIMEOUT_MS,
 				"revalidating Codex reset authentication",
@@ -455,7 +454,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				ctx.ui.notify(formatCodexResetOutcome(outcome, remaining), "info");
 				return refreshed;
 			} catch (error) {
-				if (isAbortError(error) || isStaleContextError(error)) throw error;
+				if (isAbortError(error) || !sessionActive) throw error;
 				const retryAction = "Retry with Same Request ID";
 				const retry = await ctx.ui.select("Reset Result Uncertain", [
 					retryAction,
@@ -520,7 +519,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			try {
 				await showUsage(ctx);
 			} catch (error) {
-				if (isAbortError(error) || isStaleContextError(error)) return;
+				if (isAbortError(error) || !sessionActive) return;
 				ctx.ui.notify(`Usage query failed: ${errorMessage(error)}`, "error");
 			}
 		},

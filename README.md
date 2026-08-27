@@ -60,7 +60,8 @@ node --test harnesses/pi/agent/extensions/subscription-usage/test/*.test.ts
 
 ## Security boundaries
 
-- Credentials are only used through `ctx.modelRegistry.getProviderAuth()`.
+- Usage queries resolve credentials only through `ctx.modelRegistry.getProviderAuth()`.
+- Codex reset additionally reads Pi's stored OAuth credential through the public `readStoredCredential()` API, solely to verify that it exactly matches the active runtime account before redemption.
 - Grok never reads `~/.grok/auth.json` and never accepts an API key in place of subscription OAuth.
 - Credentials are never written to caches, sessions, the statusline, or error messages; cache keys store only in-process HMAC fingerprints.
 - Credentials are only sent to the corresponding official domains; custom proxies and custom base URLs are rejected.

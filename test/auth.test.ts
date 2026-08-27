@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { verifyCodexStoredOAuthCredential } from "../src/codex-reset-core.ts";
 import { adapterForProvider, resolveUsageAuth } from "../src/query.ts";
 
 type ResolveContext = Parameters<typeof resolveUsageAuth>[0];
@@ -122,4 +123,42 @@ test("configured Grok lookup skips API-key models and selects Pi OAuth", async (
 		new Uint8Array(32).fill(9),
 	);
 	assert.equal(auth?.actualProviderId, "xai-auth");
+});
+
+function codexAccessToken(accountId: string): string {
+	const header = Buffer.from(JSON.stringify({ alg: "none" })).toString(
+		"base64url",
+	);
+	const payload = Buffer.from(
+		JSON.stringify({
+			"https://api.openai.com/auth": { chatgpt_account_id: accountId },
+		}),
+	).toString("base64url");
+	return `${header}.${payload}.fixture-signature`;
+}
+
+test("Codex reset auth requires the stored OAuth account to match runtime", () => {
+	const accountId = "account-fixture";
+	const access = codexAccessToken(accountId);
+	assert.equal(
+		verifyCodexStoredOAuthCredential(access, {
+			type: "oauth",
+			access,
+			refresh: "fixture-refresh",
+			expires: Date.now() + 60_000,
+			accountId,
+		}),
+		accountId,
+	);
+	assert.throws(
+		() =>
+			verifyCodexStoredOAuthCredential(access, {
+				type: "oauth",
+				access,
+				refresh: "fixture-refresh",
+				expires: Date.now() + 60_000,
+				accountId: "different-account",
+			}),
+		/does not match Pi's stored OAuth account/u,
+	);
 });

@@ -7,6 +7,7 @@ import { fingerprintResolvedAuth } from "./core.ts";
 import {
 	normalizeCodexResetCreditsPayload,
 	parseCodexResetOutcome,
+	verifyCodexStoredOAuthCredential,
 	type CodexResetAvailability,
 	type CodexResetOption,
 	type CodexResetOutcome,
@@ -52,31 +53,10 @@ export async function resolveCodexResetAuth(
 		bearerToken(headerValue(auth.headers, "Authorization")) ?? auth.apiKey;
 	if (!resolvedAccess)
 		throw new Error("OpenAI Codex OAuth credentials were incomplete.");
-	const resolvedAccountId = codexAccountIdFromAccessToken(resolvedAccess);
-	if (!resolvedAccountId) {
-		throw new Error(
-			"The active OpenAI Codex access token did not contain a valid account ID.",
-		);
-	}
-	const credential = asObject(credentialReader("openai-codex"));
-	if (credential?.type !== "oauth") {
-		throw new Error(
-			"Codex resets require the OAuth account configured through Pi /login.",
-		);
-	}
-	const storedAccess = nonemptyString(credential.access);
-	const accountId = validHeaderValue(credential.accountId);
-	const refresh = nonemptyString(credential.refresh);
-	if (
-		storedAccess !== resolvedAccess ||
-		!accountId ||
-		accountId !== resolvedAccountId ||
-		!refresh
-	) {
-		throw new Error(
-			"The active Codex runtime account does not match Pi's stored OAuth account.",
-		);
-	}
+	const accountId = verifyCodexStoredOAuthCredential(
+		resolvedAccess,
+		credentialReader("openai-codex"),
+	);
 	const authorization = `Bearer ${resolvedAccess}`;
 	const headers = {
 		Authorization: authorization,
@@ -88,13 +68,7 @@ export async function resolveCodexResetAuth(
 		headers,
 		fingerprint: fingerprintResolvedAuth({ headers }, salt),
 		secrets: [
-			...new Set([
-				...auth.secrets,
-				storedAccess,
-				resolvedAccess,
-				authorization,
-				accountId,
-			]),
+			...new Set([...auth.secrets, resolvedAccess, authorization, accountId]),
 		],
 		model: auth.model,
 	};
@@ -141,36 +115,6 @@ export async function consumeCodexResetCredit(
 			},
 		),
 	);
-}
-
-function codexAccountIdFromAccessToken(access: string): string | undefined {
-	try {
-		const parts = access.split(".");
-		if (parts.length !== 3 || !parts[1]) return undefined;
-		const payload = JSON.parse(
-			Buffer.from(parts[1], "base64url").toString("utf8"),
-		) as unknown;
-		const claims = asObject(asObject(payload)?.["https://api.openai.com/auth"]);
-		return validHeaderValue(claims?.chatgpt_account_id);
-	} catch {
-		return undefined;
-	}
-}
-
-function asObject(value: unknown): Record<string, unknown> | undefined {
-	return value && typeof value === "object" && !Array.isArray(value)
-		? (value as Record<string, unknown>)
-		: undefined;
-}
-
-function nonemptyString(value: unknown): string | undefined {
-	return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function validHeaderValue(value: unknown): string | undefined {
-	if (typeof value !== "string" || !value || value.length > 512)
-		return undefined;
-	return /[^\x20-\x7e]/u.test(value) ? undefined : value;
 }
 
 function bearerToken(authorization: string | undefined): string | undefined {

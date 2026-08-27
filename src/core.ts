@@ -77,7 +77,7 @@ export function fingerprintResolvedAuth(
 }
 
 export async function awaitWithDeadline<T>(
-	operation: Promise<T>,
+	operation: () => Promise<T>,
 	signal: AbortSignal,
 	timeoutMs: number,
 	description: string,
@@ -86,8 +86,12 @@ export async function awaitWithDeadline<T>(
 	let timeout: ReturnType<typeof setTimeout> | undefined;
 	let abortListener: (() => void) | undefined;
 	try {
+		const result = Promise.resolve().then(() => {
+			if (signal.aborted) throw abortError();
+			return operation();
+		});
 		return await Promise.race([
-			operation,
+			result,
 			new Promise<never>((_resolve, reject) => {
 				timeout = setTimeout(() => {
 					reject(
@@ -161,15 +165,6 @@ export function abortError(): Error {
 
 export function isAbortError(error: unknown): boolean {
 	return error instanceof Error && error.name === "AbortError";
-}
-
-export function isStaleContextError(error: unknown): boolean {
-	return (
-		error instanceof Error &&
-		error.message.includes(
-			"This extension ctx is stale after session replacement or reload",
-		)
-	);
 }
 
 export function modelIdentity(
