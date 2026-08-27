@@ -1,0 +1,35 @@
+# Publish to npm via Trusted Publisher (OIDC). No long-lived npm token.
+# Requires npm CLI >= 11.5.1 and Node >= 22.14.
+# Docs: https://docs.npmjs.com/trusted-publishers/
+
+name: Node.js Package
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm test
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted Publisher handles auth via OIDC; provenance is automatic.
+      - run: npm publish --access public
