@@ -1,0 +1,29 @@
+{
+  "name": "@specode/pi-subscription-usage",
+  "version": "0.1.0",
+  "description": "Unified subscription usage for Codex, OpenCode Go, Grok, and Kimi in Pi",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "usage",
+    "quota",
+    "codex",
+    "opencode",
+    "grok",
+    "kimi"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
