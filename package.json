@@ -1,13 +1,22 @@
 {
   "name": "@specode/pi-subscription-usage",
   "version": "0.1.0",
-  "description": "Unified subscription usage for Codex, OpenCode Go, Grok, and Kimi in Pi",
+  "description": "Show subscription quota and Codex reset credits for Codex, OpenCode Go, Grok, and Kimi in Pi",
   "type": "module",
-  "private": true,
   "license": "MIT",
+  "author": "Specode",
+  "homepage": "https://github.com/specode/pi-subscription-usage#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/specode/pi-subscription-usage.git"
+  },
+  "bugs": {
+    "url": "https://github.com/specode/pi-subscription-usage/issues"
+  },
   "keywords": [
     "pi-package",
     "pi-extension",
+    "subscription",
     "usage",
     "quota",
     "codex",
@@ -15,15 +24,28 @@
     "grok",
     "kimi"
   ],
+  "files": [
+    "index.ts",
+    "src",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
   "pi": {
     "extensions": [
       "./index.ts"
     ]
   },
   "scripts": {
-    "test": "node --test test/*.test.ts"
+    "test": "node --test test/*.test.ts",
+    "pack:check": "npm pack --dry-run",
+    "prepublishOnly": "npm test"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

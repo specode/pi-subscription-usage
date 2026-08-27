@@ -1,75 +1,116 @@
-# Pi subscription usage
+# Pi Subscription Usage
 
-Unified view of the current Pi account's subscription quota across these providers:
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-- OpenAI Codex: 5h/weekly quota, extra model quota, reset credits with confirmed redemption.
-- OpenCode Go: 5h, weekly, and monthly windows.
-- Grok: weekly or monthly window; only accepts Pi's `xai` / `xai-auth` OAuth and verifies account identity first.
-- Kimi Coding: 5h and weekly windows.
+A Pi extension that shows the active account's subscription quota in one consistent view.
 
-The plugin does not implement or modify Codex Fast mode and never rewrites model requests.
+Supported providers:
+
+- **OpenAI Codex** — 5-hour and weekly quota, model-specific quota, and confirmed reset-credit redemption.
+- **OpenCode Go** — 5-hour, weekly, and monthly windows.
+- **Grok** — weekly or monthly quota using only Pi's `xai` / `xai-auth` OAuth credentials, with account identity verification.
+- **Kimi Coding** — 5-hour and weekly windows.
+
+The extension does not implement or modify Codex Fast mode and never rewrites model requests.
+
+## Installation
+
+Install directly from GitHub:
+
+```bash
+pi install git:github.com/specode/pi-subscription-usage
+```
+
+After the npm package is published, it can also be installed with:
+
+```bash
+pi install npm:@specode/pi-subscription-usage
+```
+
+For local development:
+
+```bash
+pi install /absolute/path/to/pi-subscription-usage
+```
+
+Pi packages execute with your full system permissions. Review third-party package source before installing it.
 
 ## Usage
 
-With the plugin installed, run:
+Run:
 
 ```text
 /usage
 ```
 
-Every `/usage` call skips the cache and re-queries the current provider, showing per-window remaining quota with `MM/DD HH:mm` reset times in a uniform format. Codex is grouped by quota domain: `Shared Across Models` first, then each model-specific section, then `Account` — windows from different domains are never interleaved. The command no longer offers refresh, other-provider, or all-provider menus; run `/usage` again to refresh.
+Each invocation bypasses the cache and queries the current provider again. Quota windows use a uniform display with `MM/DD HH:mm` reset times.
 
-The reset menu only appears when the current provider is Codex and redeemable reset credits were found. Grok's current API only exposes quota windows and natural reset times, with no verified manual reset endpoint or credit count, so the plugin never fakes a reset action.
+Codex results are grouped by quota domain in this order:
 
-Status output has two layers: the plugin provides a plain default string via `setStatus` without provider name or icons (e.g. `5h 99% · 1w 85% · 1m 60%`), and publishes structured window data through `subscription-usage/status/v1`; windows are always ordered `5h / 1w / 1m / other`. session-ui can consume that event to supply its own Nerd Font icons, colors, and layout without parsing the display string.
+1. `Shared Across Models`
+2. Model-specific sections
+3. `Account`
 
-Before a Codex reset is consumed, the plugin:
+Windows from different domains are never interleaved. Run `/usage` again whenever you want to refresh; the command does not show refresh, provider-switching, or all-provider menus.
 
-1. Confirms the current model is still Codex;
-2. Confirms the Pi runtime token matches the local `/login` OAuth account exactly;
-3. Shows the reset to be consumed and asks for final confirmation — the selector's first item is always `Cancel (Default)`, and only deliberately choosing the second item proceeds;
-4. Uses a unique request ID, reused across retries.
+The reset menu appears only when Codex reports redeemable reset credits. Grok's current API exposes quota windows and natural reset times, but no verified manual-reset endpoint or reset-credit count, so the extension never invents a reset action.
 
-## Install into this repo's Pi config
+## Codex reset safety
 
-Run:
+Before redeeming a Codex reset credit, the extension:
 
-```bash
-./install-harness.sh pi
-```
+1. Verifies that the active model is still using Codex.
+2. Verifies that the runtime token exactly matches the OAuth account stored by Pi through `/login`.
+3. Shows the reset that will be consumed and asks for explicit confirmation. `Cancel (Default)` is always the first option; only deliberately choosing the second option continues.
+4. Uses a unique request ID and reuses it across retries.
 
-The installer copies this whole directory to:
+## Status integration
 
-```text
-~/.pi/agent/extensions/subscription-usage/
-```
+The extension publishes two status layers:
 
-Pi discovers its `index.ts` automatically. For development you can load it directly:
+- A plain `setStatus` string without provider names or icons, such as `5h 99% · 1w 85% · 1m 60%`.
+- Structured window data through the `subscription-usage/status/v1` event.
 
-```bash
-pi --no-extensions --offline \
-  -e ./harnesses/pi/agent/extensions/subscription-usage/index.ts \
-  --list-models
-```
-
-## Tests
-
-```bash
-node --test harnesses/pi/agent/extensions/subscription-usage/test/*.test.ts
-```
+Windows are always ordered as `5h / 1w / 1m / other`. Other extensions can consume the structured event to provide their own icons, colors, and layout without parsing display text.
 
 ## Security boundaries
 
 - Usage queries resolve credentials only through `ctx.modelRegistry.getProviderAuth()`.
 - Codex reset additionally reads Pi's stored OAuth credential through the public `readStoredCredential()` API, solely to verify that it exactly matches the active runtime account before redemption.
 - Grok never reads `~/.grok/auth.json` and never accepts an API key in place of subscription OAuth.
-- Credentials are never written to caches, sessions, the statusline, or error messages; cache keys store only in-process HMAC fingerprints.
-- Credentials are only sent to the corresponding official domains; custom proxies and custom base URLs are rejected.
-- Codex reset is the only write operation. It is only shown when redeemable credits exist and always requires explicit user confirmation.
+- Credentials are never written to caches, sessions, the status line, or error messages. Cache keys contain only in-process HMAC fingerprints.
+- Credentials are sent only to the corresponding official domains. Custom proxies and custom base URLs are rejected.
+- Codex reset is the only write operation. It is shown only when redeemable credits exist and always requires explicit confirmation.
 
-## Stability notes
+## Development
 
-Codex reset, Grok billing, and Kimi usage rely on undocumented provider APIs that may change.
-When an API fails, the plugin only reports the query error and never falls back to uncontrolled credential or proxy paths.
+Requirements:
 
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party sources and licenses.
+- A current Pi installation.
+- A Node.js version that can run TypeScript files directly for the test suite.
+
+Run the tests:
+
+```bash
+npm test
+```
+
+Inspect the npm package contents:
+
+```bash
+npm run pack:check
+```
+
+Load the extension directly without installing it:
+
+```bash
+pi --no-extensions --offline -e ./index.ts --list-models
+```
+
+## Stability
+
+Codex reset, Grok billing, and Kimi usage rely on undocumented provider APIs that may change. When an API fails, the extension reports the query error and does not fall back to uncontrolled credential or proxy paths.
+
+## License
+
+[MIT](LICENSE). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for adapted third-party sources and licenses.
