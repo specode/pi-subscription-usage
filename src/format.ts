@@ -1,9 +1,11 @@
 // Formatting model adapted from @narumitw/pi-usage@0.53.0 (MIT).
 import {
-	sortUsageBuckets,
-	usagePercentRemaining,
-	usageWindowLabel,
-} from "./status.ts";
+	DEFAULT_USAGE_DISPLAY_MODE,
+	usageAmount,
+	usagePercent,
+	type UsageDisplayMode,
+} from "./display.ts";
+import { sortUsageBuckets, usageWindowLabel } from "./status.ts";
 import type {
 	ProviderUsageState,
 	UsageBucket,
@@ -25,8 +27,11 @@ interface PanelSection {
 	rows: PanelRow[];
 }
 
-export function formatUsageReport(report: UsageReport): string {
-	const sections = bucketSections(report.buckets);
+export function formatUsageReport(
+	report: UsageReport,
+	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
+): string {
+	const sections = bucketSections(report.buckets, displayMode);
 	const accountRows: PanelRow[] = report.metrics.map((metric) => ({
 		label: metricLabel(metric),
 		detail: formatMetric(metric),
@@ -59,47 +64,57 @@ export function formatUsageReport(report: UsageReport): string {
 	return lines.join("\n");
 }
 
-export function formatProviderState(state: ProviderUsageState): string {
-	if (state.status === "ready") return formatUsageReport(state.report);
+export function formatProviderState(
+	state: ProviderUsageState,
+	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
+): string {
+	if (state.status === "ready") {
+		return formatUsageReport(state.report, displayMode);
+	}
 	let status = "Query Failed";
 	if (state.status === "auth-unavailable") status = "Auth Unavailable";
 	else if (state.status === "unsupported") status = "Unsupported";
 	return `${state.providerName}\n  ${status}: ${state.message}`;
 }
 
-function formatBucket(bucket: UsageBucket): string {
-	const remaining = usagePercentRemaining(bucket);
+function formatBucket(
+	bucket: UsageBucket,
+	displayMode: UsageDisplayMode,
+): string {
+	const selectedPercent = usagePercent(bucket, displayMode);
+	const selectedAmount = usageAmount(bucket, displayMode);
+	const qualifier = displayMode === "used" ? "used" : "left";
 	const reset = bucket.resetsAt
 		? ` · resets ${formatReset(bucket.resetsAt)}`
 		: "";
-	if (remaining !== undefined) {
-		const filled = Math.round((remaining / 100) * BAR_SEGMENTS);
+	if (selectedPercent !== undefined) {
+		const filled = Math.round((selectedPercent / 100) * BAR_SEGMENTS);
 		const bar = `${"█".repeat(filled)}${"░".repeat(BAR_SEGMENTS - filled)}`;
-		const percent = `${String(Math.round(remaining)).padStart(3)}%`;
+		const percent = `${String(Math.round(selectedPercent)).padStart(3)}%`;
 		if (
 			bucket.unit !== "percent" &&
 			bucket.limit !== undefined &&
 			bucket.limit !== 100 && // x/100 duplicates the percent exactly
-			bucket.remaining !== undefined
+			selectedAmount !== undefined
 		) {
-			return `${bar}  ${percent} left · ${formatNumber(bucket.remaining)}/${formatNumber(bucket.limit)}${reset}`;
+			return `${bar}  ${percent} ${qualifier} · ${formatNumber(selectedAmount)}/${formatNumber(bucket.limit)}${reset}`;
 		}
-		return `${bar}  ${percent} left${reset}`;
+		return `${bar}  ${percent} ${qualifier}${reset}`;
 	}
 	const indent = " ".repeat(BAR_SEGMENTS + 2);
-	if (bucket.remaining !== undefined) {
-		return `${indent}${formatValue(bucket.remaining, bucket.unit)} left${reset}`;
-	}
-	return `${indent}${formatValue(bucket.used ?? "n/a", bucket.unit)} used${reset}`;
+	return `${indent}${formatValue(selectedAmount ?? "n/a", bucket.unit)} ${qualifier}${reset}`;
 }
 
-function bucketSections(buckets: readonly UsageBucket[]): PanelSection[] {
+function bucketSections(
+	buckets: readonly UsageBucket[],
+	displayMode: UsageDisplayMode,
+): PanelSection[] {
 	if (!buckets.some((bucket) => bucket.groupId)) {
 		return [
 			{
 				rows: sortUsageBuckets(buckets).map((bucket) => ({
 					label: usageWindowLabel(bucket),
-					detail: formatBucket(bucket),
+					detail: formatBucket(bucket, displayMode),
 				})),
 			},
 		];
@@ -130,7 +145,7 @@ function bucketSections(buckets: readonly UsageBucket[]): PanelSection[] {
 			heading: group.heading,
 			rows: sortUsageBuckets(group.buckets).map((bucket) => ({
 				label: usageWindowLabel(bucket),
-				detail: formatBucket(bucket),
+				detail: formatBucket(bucket, displayMode),
 			})),
 		}));
 }

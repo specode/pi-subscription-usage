@@ -1,4 +1,13 @@
+import {
+	DEFAULT_USAGE_DISPLAY_MODE,
+	usagePercent,
+	usagePercentRemaining,
+	usagePercentUsed,
+	type UsageDisplayMode,
+} from "./display.ts";
 import type { UsageBucket, UsageModel, UsageReport } from "./types.ts";
+
+export { usagePercentRemaining, usagePercentUsed } from "./display.ts";
 
 export const USAGE_STATUS_EVENT = "subscription-usage/status/v1";
 
@@ -13,6 +22,8 @@ export interface UsageStatusWindow {
 	kind: UsageStatusWindowKind;
 	label: string;
 	remainingPercent: number;
+	usedPercent: number;
+	displayPercent: number;
 	windowMinutes?: number;
 	resetsAt?: number;
 }
@@ -23,6 +34,7 @@ export type UsageStatusEvent =
 			status: "ready";
 			providerId: string;
 			capturedAt: number;
+			displayMode: UsageDisplayMode;
 			windows: UsageStatusWindow[];
 	  }
 	| {
@@ -37,6 +49,7 @@ export function unavailableUsageStatusEvent(): UsageStatusEvent {
 export function buildUsageStatusEvent(
 	report: UsageReport,
 	model?: UsageModel,
+	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
 ): UsageStatusEvent {
 	const buckets =
 		report.providerId === "openai-codex"
@@ -44,12 +57,22 @@ export function buildUsageStatusEvent(
 			: report.buckets;
 	const windows = sortUsageBuckets(buckets).flatMap((bucket) => {
 		const remainingPercent = usagePercentRemaining(bucket);
-		if (remainingPercent === undefined) return [];
+		const usedPercent = usagePercentUsed(bucket);
+		const displayPercent = usagePercent(bucket, displayMode);
+		if (
+			remainingPercent === undefined ||
+			usedPercent === undefined ||
+			displayPercent === undefined
+		) {
+			return [];
+		}
 		return [
 			{
 				kind: usageWindowKind(bucket),
 				label: compactUsageWindowLabel(bucket),
 				remainingPercent,
+				usedPercent,
+				displayPercent,
 				...(bucket.windowMinutes === undefined
 					? {}
 					: { windowMinutes: bucket.windowMinutes }),
@@ -62,6 +85,7 @@ export function buildUsageStatusEvent(
 		status: "ready",
 		providerId: report.providerId,
 		capturedAt: report.capturedAt,
+		displayMode,
 		windows,
 	};
 }
@@ -70,13 +94,14 @@ export function buildUsageStatusEvent(
 export function formatUsageStatusline(
 	report: UsageReport,
 	model?: UsageModel,
+	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
 ): string | undefined {
-	const event = buildUsageStatusEvent(report, model);
+	const event = buildUsageStatusEvent(report, model, displayMode);
 	if (event.status !== "ready" || event.windows.length === 0) return undefined;
 	return event.windows
 		.map(
 			(window) =>
-				`${window.label} ${Math.round(window.remainingPercent).toString()}%`,
+				`${window.label} ${Math.round(window.displayPercent).toString()}%`,
 		)
 		.join(" · ");
 }
@@ -142,14 +167,6 @@ export function sortUsageBuckets(
 	});
 }
 
-export function usagePercentRemaining(bucket: UsageBucket): number | undefined {
-	if (bucket.unit === "percent" && bucket.remaining !== undefined) {
-		return clampPercent(bucket.remaining);
-	}
-	if (!bucket.limit || bucket.remaining === undefined) return undefined;
-	return clampPercent((bucket.remaining / bucket.limit) * 100);
-}
-
 function usageWindowRank(bucket: UsageBucket): number {
 	const kind = usageWindowKind(bucket);
 	if (kind === "hourly" || kind === "rolling") return 0;
@@ -206,8 +223,4 @@ function normalizeKey(value: string | undefined): string | undefined {
 			.replace(/[^a-z0-9]+/gu, "-")
 			.replace(/^-+|-+$/gu, "") || undefined
 	);
-}
-
-function clampPercent(value: number): number {
-	return Math.min(100, Math.max(0, value));
 }

@@ -55,6 +55,23 @@ Windows from different domains are never interleaved. Run `/usage` again wheneve
 
 The reset menu appears only when Codex reports redeemable reset credits. Grok's current API exposes quota windows and natural reset times, but no verified manual-reset endpoint or reset-credit count, so the extension never invents a reset action.
 
+## Configuration
+
+Create `~/.pi/agent/subscription-usage.json` for a global setting, or `.pi/subscription-usage.json` in a trusted project to override it:
+
+```json
+{
+  "displayMode": "used"
+}
+```
+
+`displayMode` accepts:
+
+- `"remaining"` — show quota remaining (default, preserving the existing behavior).
+- `"used"` — show quota consumed.
+
+The setting applies to the footer status, `/usage` quota bars, and the structured status event. Run `/reload` after editing the file.
+
 ## Codex reset safety
 
 Before redeeming a Codex reset credit, the extension:
@@ -71,7 +88,7 @@ The extension publishes two status layers:
 - A plain `setStatus` string without provider names or icons, such as `5h 99% · 1w 85% · 1m 60%`.
 - Structured window data through the `subscription-usage/status/v1` event.
 
-Windows are always ordered as `5h / 1w / 1m / other`. Other extensions can consume the structured event to provide their own icons, colors, and layout without parsing display text.
+Windows are always ordered as `5h / 1w / 1m / other`. Other extensions can consume the structured event to provide their own icons, colors, and layout without parsing display text. Ready events include `displayMode`; each window includes `displayPercent`, `remainingPercent`, and `usedPercent`. Consumers should render `displayPercent` while using the explicit remaining/used fields for semantic decisions such as colors or alerts.
 
 ## Security boundaries
 

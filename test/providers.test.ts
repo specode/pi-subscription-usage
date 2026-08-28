@@ -50,12 +50,20 @@ test("normalizes Codex windows and earned resets", () => {
 		2,
 	);
 	assert.equal(formatUsageStatusline(report), "5h 75% · 1w 50%");
+	assert.equal(
+		formatUsageStatusline(report, undefined, "used"),
+		"5h 25% · 1w 50%",
+	);
 	const panel = formatUsageReport(report);
 	assert.match(
 		panel,
 		/Shared Across Models:\n    5h Window +[█░]{12} +75% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n    1w Window +[█░]{12} +50% left/u,
 	);
 	assert.match(panel, /gpt-5\.6-spark:\n    5h Window +[█░]{12} +10% left/u);
+	assert.match(
+		formatUsageReport(report, "used"),
+		/Shared Across Models:\n    5h Window +[█░]{12} +25% used/u,
+	);
 	assert.ok(
 		panel.indexOf("Shared Across Models:") < panel.indexOf("gpt-5.6-spark:"),
 	);
@@ -115,6 +123,27 @@ test("builds provider-neutral status data in 5h/1w/1m order", () => {
 		event.windows.map((window) => window.label),
 		["5h", "1w", "1m"],
 	);
+	assert.equal(event.displayMode, "remaining");
+	assert.deepEqual(
+		event.windows.map((window) => [
+			window.remainingPercent,
+			window.usedPercent,
+			window.displayPercent,
+		]),
+		[
+			[90, 10, 90],
+			[80, 20, 80],
+			[70, 30, 70],
+		],
+	);
+	const usedEvent = buildUsageStatusEvent(report, undefined, "used");
+	assert.equal(usedEvent.status, "ready");
+	if (usedEvent.status !== "ready") return;
+	assert.equal(usedEvent.displayMode, "used");
+	assert.deepEqual(
+		usedEvent.windows.map((window) => window.displayPercent),
+		[10, 20, 30],
+	);
 	assert.equal(formatUsageStatusline(report), "5h 90% · 1w 80% · 1m 70%");
 });
 
@@ -145,6 +174,18 @@ test("normalizes Kimi weekly and rolling quotas", () => {
 	assert.equal(report.buckets[1]?.label, "5h window");
 	assert.equal(report.buckets[1]?.remaining, 80);
 	assert.equal(formatUsageStatusline(report), "5h 80% · 1w 75%");
+	assert.equal(
+		formatUsageStatusline(report, undefined, "used"),
+		"5h 20% · 1w 25%",
+	);
+	assert.match(
+		formatUsageReport(report, "used"),
+		/5h Window +[█░]{12} +20% used · resets/u,
+	);
+	assert.match(
+		formatUsageReport(report, "used"),
+		/1w Window +[█░]{12} +25% used · 250\/1000/u,
+	);
 });
 
 test("verifies Grok identity before normalizing billing", () => {

@@ -4,6 +4,7 @@ import type {
 	ExtensionCommandContext,
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { loadUsageConfig } from "./config.ts";
 import {
 	awaitWithDeadline,
 	errorMessage,
@@ -11,6 +12,10 @@ import {
 	modelIdentity,
 	UsageCache,
 } from "./core.ts";
+import {
+	DEFAULT_USAGE_DISPLAY_MODE,
+	type UsageDisplayMode,
+} from "./display.ts";
 import {
 	CODEX_RESET_CONFIRMATION_OPTIONS,
 	codexResetCount,
@@ -65,6 +70,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 	const failureBackoff = new Map<string, { until: number; message: string }>();
 	const activeControllers = new Set<AbortController>();
 	let sessionActive = false;
+	let displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE;
 	let statusGeneration = 0;
 	let statusController: AbortController | undefined;
 	let statusTimer: ReturnType<typeof setTimeout> | undefined;
@@ -145,8 +151,10 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			}
 			return;
 		}
-		emitUsageStatus(buildUsageStatusEvent(outcome.state.report, model));
-		const value = formatUsageStatusline(outcome.state.report, model);
+		emitUsageStatus(
+			buildUsageStatusEvent(outcome.state.report, model, displayMode),
+		);
+		const value = formatUsageStatusline(outcome.state.report, model, displayMode);
 		if (!safeSetStatus(ctx, value)) return;
 		if (schedule && sessionActive) scheduleStatusRefresh(ctx, model);
 	}
@@ -482,7 +490,10 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				);
 				return;
 			}
-			ctx.ui.notify(formatProviderState(current.outcome.state), "info");
+			ctx.ui.notify(
+				formatProviderState(current.outcome.state, displayMode),
+				"info",
+			);
 			if (current.model) {
 				publishStatus(ctx, current.outcome, current.model, sessionActive);
 			}
@@ -501,7 +512,10 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			if (!action) return;
 			const refreshed = await redeemCodexReset(ctx, current, controller);
 			if (refreshed?.outcome.state.status === "ready") {
-				ctx.ui.notify(formatProviderState(refreshed.outcome.state), "info");
+				ctx.ui.notify(
+					formatProviderState(refreshed.outcome.state, displayMode),
+					"info",
+				);
 			}
 		} finally {
 			controller.abort();
@@ -527,6 +541,11 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 
 	pi.on("session_start", (_event, ctx) => {
 		sessionActive = ctx.hasUI;
+		const config = loadUsageConfig(ctx.cwd, ctx.isProjectTrusted());
+		displayMode = config.displayMode;
+		for (const warning of config.warnings) {
+			ctx.ui.notify(`Usage config ignored: ${warning}`, "warning");
+		}
 		if (ctx.hasUI) startStatusRefresh(ctx, ctx.model, false);
 	});
 	pi.on("session_tree", (_event, ctx) => {

@@ -55,6 +55,23 @@ Codex 结果会按以下额度域分组：
 
 只有当 Codex 返回可兑换的重置次数时，才会显示重置菜单。Grok 当前 API 只公开额度窗口和自然重置时间，没有经过验证的手动重置端点或重置次数，因此本扩展不会虚构重置操作。
 
+## 配置
+
+可创建 `~/.pi/agent/subscription-usage.json` 作为全局配置，或在受信任项目中创建 `.pi/subscription-usage.json` 覆盖全局配置：
+
+```json
+{
+  "displayMode": "used"
+}
+```
+
+`displayMode` 支持：
+
+- `"remaining"`：显示剩余额度（默认值，保持当前行为）。
+- `"used"`：显示已使用额度。
+
+该配置同时作用于底部状态、`/usage` 额度条和结构化状态事件。修改配置文件后运行 `/reload`。
+
 ## Codex 重置安全措施
 
 兑换 Codex 重置次数前，本扩展会：
@@ -71,7 +88,7 @@ Codex 结果会按以下额度域分组：
 - 不含提供商名称或图标的普通 `setStatus` 文本，例如 `5h 99% · 1w 85% · 1m 60%`。
 - 通过 `subscription-usage/status/v1` 事件发布的结构化窗口数据。
 
-窗口始终按 `5h / 1w / 1m / other` 排序。其他扩展可以直接消费结构化事件，自定义图标、颜色和布局，而不必解析显示文本。
+窗口始终按 `5h / 1w / 1m / other` 排序。其他扩展可以直接消费结构化事件，自定义图标、颜色和布局，而不必解析显示文本。就绪事件包含 `displayMode`，每个窗口包含 `displayPercent`、`remainingPercent` 和 `usedPercent`；消费者应展示 `displayPercent`，并在颜色或告警等语义判断中使用明确的剩余/已用字段。
 
 ## 安全边界
 
