@@ -8,7 +8,7 @@ Supported providers:
 
 - **OpenAI Codex** — 5-hour and weekly quota, model-specific quota, and confirmed reset-credit redemption.
 - **OpenCode Go** — 5-hour, weekly, and monthly windows.
-- **Grok** — weekly or monthly quota using only Pi's `xai` / `xai-auth` OAuth credentials, with account identity verification.
+- **Grok** — weekly and/or monthly quota using only Pi's `xai` / `xai-auth` OAuth credentials, with account identity verification. Unified SuperGrok billing is read from the default monthly endpoint when `?format=credits` omits window percents. Windows use the same `5h / 1w / 1m` status format as other providers.
 - **Kimi Coding** — 5-hour and weekly windows.
 
 The extension does not implement or modify Codex Fast mode and never rewrites model requests.
@@ -53,7 +53,7 @@ Codex results are grouped by quota domain in this order:
 
 Windows from different domains are never interleaved. Run `/usage` again whenever you want to refresh; the command does not show refresh, provider-switching, or all-provider menus.
 
-The reset menu appears only when Codex reports redeemable reset credits. Grok's current API exposes quota windows and natural reset times, but no verified manual-reset endpoint or reset-credit count, so the extension never invents a reset action.
+The reset menu appears only when Codex reports redeemable reset credits. Grok's current API exposes quota windows and natural reset times, but no verified manual-reset endpoint or reset-credit count, so the extension never invents a reset action. Grok windows still render through the same `/usage` bars and status event as Codex, OpenCode Go, and Kimi.
 
 ## Configuration
 

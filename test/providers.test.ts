@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { formatUsageReport, formatUsageStatusline } from "../src/format.ts";
+import { SUPPORTED_ADAPTERS } from "../src/query.ts";
 import { buildUsageStatusEvent } from "../src/status.ts";
 import { normalizeCodexUsage } from "../src/providers/codex.ts";
+import type { ResolvedUsageAuth } from "../src/types.ts";
 import {
 	grokRequestHeaders,
 	normalizeGrokBilling,
 	normalizeGrokIdentity,
+	requiresGrokMonthlyQuota,
+	shouldProbeGrokMonthly,
 } from "../src/providers/grok.ts";
 import { normalizeKimiUsage } from "../src/providers/kimi.ts";
 import { normalizeOpenCodeGoUsage } from "../src/providers/opencode-go.ts";
@@ -63,17 +67,17 @@ test("normalizes Codex windows and earned resets", () => {
 	const panel = formatUsageReport(report);
 	assert.match(
 		panel,
-		/Shared Across Models:\n    5h Window +[█░]{12} +75% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n    1w Window +[█░]{12} +50% left/u,
+		/Shared Across Models:\n {4}5h Window +[█░]{12} +75% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n {4}1w Window +[█░]{12} +50% left/u,
 	);
-	assert.match(panel, /gpt-5\.6-spark:\n    5h Window +[█░]{12} +10% left/u);
+	assert.match(panel, /gpt-5\.6-spark:\n {4}5h Window +[█░]{12} +10% left/u);
 	assert.match(
 		formatUsageReport(report, "used"),
-		/Shared Across Models:\n    5h Window +[█░]{12} +25% used/u,
+		/Shared Across Models:\n {4}5h Window +[█░]{12} +25% used/u,
 	);
 	assert.ok(
 		panel.indexOf("Shared Across Models:") < panel.indexOf("gpt-5.6-spark:"),
 	);
-	assert.match(panel, /Account:\n    Resets Left +2/u);
+	assert.match(panel, /Account:\n {4}Resets Left +2/u);
 	assert.equal(
 		formatUsageStatusline(report, {
 			provider: "openai-codex",
@@ -257,29 +261,29 @@ test("verifies Grok identity before normalizing billing", () => {
 	);
 	assert.equal(normalizeGrokIdentity({ userId: "user_123" }), "user_123");
 	assert.throws(() => normalizeGrokIdentity({ userId: "bad\nuser" }));
-	const report = normalizeGrokBilling(
-		{
-			subscriptionTier: "SuperGrok",
-			onDemandEnabled: false,
-			config: {
-				creditUsagePercent: 40,
-				currentPeriod: {
-					type: "USAGE_PERIOD_TYPE_WEEKLY",
-					end: "2026-09-01T00:00:00Z",
-				},
-				used: { val: 400 },
-				monthlyLimit: { val: 1_000 },
-				prepaidBalance: { val: 250 },
+	const credits = {
+		subscriptionTier: "SuperGrok",
+		onDemandEnabled: false,
+		config: {
+			creditUsagePercent: 40,
+			currentPeriod: {
+				type: "USAGE_PERIOD_TYPE_WEEKLY",
+				end: "2026-09-01T00:00:00Z",
 			},
+			used: { val: 400 },
+			monthlyLimit: { val: 1_000 },
+			prepaidBalance: { val: 250 },
 		},
-		capturedAt,
-	);
+	};
+	const report = normalizeGrokBilling(credits, capturedAt);
 	assert.equal(report.buckets[0]?.remaining, 60);
+	assert.equal(report.buckets[0]?.period, "weekly");
+	assert.equal(report.buckets[0]?.id, "weekly");
+	assert.equal(shouldProbeGrokMonthly(credits), false);
 	assert.equal(
 		report.metrics.find((metric) => metric.id === "prepaid-balance")?.value,
 		2.5,
 	);
-	assert.equal(report.buckets[0]?.period, "weekly");
 	assert.equal(
 		report.metrics.find((metric) => metric.id === "plan")?.value,
 		"SuperGrok",
@@ -298,3 +302,369 @@ test("verifies Grok identity before normalizing billing", () => {
 	assert.match(panel, /Plan +SuperGrok/u);
 	assert.match(panel, /On-Demand +off/u);
 });
+
+test("maps unified Grok monthly quota onto the shared 1m window", () => {
+	const credits = {
+		subscriptionTier: "SuperGrok",
+		config: {
+			isUnifiedBillingUser: true,
+			currentPeriod: {
+				type: "USAGE_PERIOD_TYPE_WEEKLY",
+				start: "2026-08-20T10:00:00Z",
+				end: "2026-08-27T12:00:00Z",
+			},
+			onDemandCap: { val: 0 },
+			onDemandUsed: { val: 0 },
+			prepaidBalance: { val: 0 },
+		},
+	};
+	const monthly = {
+		config: {
+			monthlyLimit: { val: 15_000 },
+			used: { val: 10_548 },
+			billingPeriodStart: "2026-08-01T00:00:00Z",
+			billingPeriodEnd: "2026-09-01T00:00:00Z",
+		},
+	};
+	assert.equal(shouldProbeGrokMonthly(credits), true);
+	const report = normalizeGrokBilling(credits, capturedAt, monthly);
+	assert.equal(report.buckets[0]?.id, "monthly");
+	assert.equal(report.buckets[0]?.period, "monthly");
+	assert.equal(Math.round(report.buckets[0]?.used ?? 0), 70);
+	assert.equal(formatUsageStatusline(report), "1m 30%");
+	assert.match(
+		formatUsageReport(report),
+		/1m Window +[█░]{12} +30% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
+	);
+	assert.equal(
+		report.metrics.find((metric) => metric.id === "included-used")?.value,
+		105.48,
+	);
+});
+
+test("keeps explicit Grok weekly percent and adds a monthly window when both exist", () => {
+	const credits = {
+		config: {
+			isUnifiedBillingUser: true,
+			creditUsagePercent: 20,
+			currentPeriod: {
+				type: "USAGE_PERIOD_TYPE_WEEKLY",
+				end: "2026-09-01T00:00:00Z",
+			},
+		},
+	};
+	const monthly = {
+		config: {
+			monthlyLimit: { val: 1_000 },
+			used: { val: 400 },
+			billingPeriodStart: "2026-08-01T00:00:00Z",
+			billingPeriodEnd: "2026-09-01T00:00:00Z",
+		},
+	};
+	const report = normalizeGrokBilling(credits, capturedAt, monthly);
+	assert.equal(formatUsageStatusline(report), "1w 80% · 1m 60%");
+	assert.match(
+		formatUsageReport(report),
+		/1w Window +[█░]{12} +80% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n {2}1m Window +[█░]{12} +60% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
+	);
+});
+
+test("falls back to Grok included cents when weekly percent is omitted", () => {
+	const credits = {
+		config: {
+			currentPeriod: {
+				type: "USAGE_PERIOD_TYPE_WEEKLY",
+				end: "2026-09-01T00:00:00Z",
+			},
+			used: { val: 400 },
+			monthlyLimit: { val: 1_000 },
+		},
+	};
+	assert.equal(shouldProbeGrokMonthly(credits), false);
+	const report = normalizeGrokBilling(credits, capturedAt);
+	assert.equal(formatUsageStatusline(report), "1w 60%");
+});
+
+test("requires monthly quota when Grok weekly percent is omitted", () => {
+	const credits = {
+		config: {
+			currentPeriod: {
+				type: "USAGE_PERIOD_TYPE_WEEKLY",
+				start: "2026-08-20T10:00:00Z",
+				end: "2026-09-01T00:00:00Z",
+			},
+		},
+	};
+	assert.equal(shouldProbeGrokMonthly(credits), true);
+	assert.equal(requiresGrokMonthlyQuota(credits), true);
+	assert.throws(
+		() => normalizeGrokBilling(credits, capturedAt),
+		/no displayable quota window/u,
+	);
+});
+
+test("does not invent Grok weekly usage from a zero-limit monthly response", () => {
+	const credits = {
+		config: {
+			isUnifiedBillingUser: true,
+			currentPeriod: {
+				type: "USAGE_PERIOD_TYPE_WEEKLY",
+				start: "2026-08-20T10:00:00Z",
+				end: "2026-09-01T00:00:00Z",
+			},
+		},
+	};
+	assert.throws(
+		() =>
+			normalizeGrokBilling(credits, capturedAt, {
+				config: {
+					monthlyLimit: { val: 0 },
+					used: { val: 500 },
+				},
+			}),
+		/no displayable quota window/u,
+	);
+});
+
+test("rejects Grok reports with metrics but no quota window", () => {
+	const credits = {
+		config: {
+			isUnifiedBillingUser: true,
+			currentPeriod: {
+				type: "USAGE_PERIOD_TYPE_WEEKLY",
+				start: "2026-08-20T10:00:00Z",
+				end: "2026-09-01T00:00:00Z",
+			},
+			prepaidBalance: { val: 250 },
+		},
+	};
+	for (const monthly of [null, {}, { config: "bad" }]) {
+		assert.throws(
+			() => normalizeGrokBilling(credits, capturedAt, monthly),
+			/no displayable quota window/u,
+		);
+	}
+});
+
+test("keeps Grok monthly cents as a 1m window even if currentPeriod is weekly", () => {
+	const report = normalizeGrokBilling(
+		{ config: { isUnifiedBillingUser: true } },
+		capturedAt,
+		{
+			config: {
+				currentPeriod: {
+					type: "USAGE_PERIOD_TYPE_WEEKLY",
+					end: "2026-09-01T00:00:00Z",
+				},
+				monthlyLimit: { val: 1_000 },
+				used: { val: 400 },
+				billingPeriodStart: "2026-08-01T00:00:00Z",
+				billingPeriodEnd: "2026-09-01T00:00:00Z",
+			},
+		},
+	);
+	assert.equal(report.buckets[0]?.id, "monthly");
+	assert.equal(formatUsageStatusline(report), "1m 60%");
+	assert.equal(formatUsageStatusline(report, undefined, "used"), "1m 40%");
+});
+
+test("maps cents-only Grok billing without a weekly period onto 1m", () => {
+	const report = normalizeGrokBilling(
+		{
+			config: {
+				used: { val: 400 },
+				monthlyLimit: { val: 1_000 },
+				billingPeriodStart: "2026-08-01T00:00:00Z",
+				billingPeriodEnd: "2026-09-01T00:00:00Z",
+			},
+		},
+		capturedAt,
+	);
+	assert.equal(formatUsageStatusline(report), "1m 60%");
+});
+
+test("Grok adapter probes monthly billing for unified accounts", async () => {
+	const original = globalThis.fetch;
+	const calls: string[] = [];
+	globalThis.fetch = async (input) => {
+		const url = String(input);
+		calls.push(url);
+		if (url.endsWith("/v1/user")) {
+			return jsonResponse({ userId: "user_123" });
+		}
+		if (url.includes("format=credits")) {
+			return jsonResponse({
+				config: {
+					isUnifiedBillingUser: true,
+					currentPeriod: {
+						type: "USAGE_PERIOD_TYPE_WEEKLY",
+						end: "2026-09-01T00:00:00Z",
+					},
+				},
+			});
+		}
+		return jsonResponse({
+			config: {
+				monthlyLimit: { val: 15_000 },
+				used: { val: 10_548 },
+				billingPeriodStart: "2026-08-01T00:00:00Z",
+				billingPeriodEnd: "2026-09-01T00:00:00Z",
+			},
+		});
+	};
+	try {
+		const report = await requiredAdapter("xai").query(
+			grokAuth(),
+			new AbortController().signal,
+			5_000,
+		);
+		assert.equal(formatUsageStatusline(report), "1m 30%");
+		assert.deepEqual(calls, [
+			"https://cli-chat-proxy.grok.com/v1/user",
+			"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+			"https://cli-chat-proxy.grok.com/v1/billing",
+		]);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("Grok adapter surfaces a required monthly billing failure", async () => {
+	const original = globalThis.fetch;
+	const calls: string[] = [];
+	globalThis.fetch = async (input) => {
+		const url = String(input);
+		calls.push(url);
+		if (url.endsWith("/v1/user")) {
+			return jsonResponse({ userId: "user_123" });
+		}
+		if (url.includes("format=credits")) {
+			return jsonResponse({
+				config: {
+					isUnifiedBillingUser: true,
+					currentPeriod: {
+						type: "USAGE_PERIOD_TYPE_WEEKLY",
+						end: "2026-09-01T00:00:00Z",
+					},
+					prepaidBalance: { val: 250 },
+				},
+			});
+		}
+		return jsonResponse({ error: "unavailable" }, 500);
+	};
+	try {
+		await assert.rejects(
+			requiredAdapter("xai").query(
+				grokAuth(),
+				new AbortController().signal,
+				5_000,
+			),
+			/Grok monthly billing endpoint returned 500/u,
+		);
+		assert.deepEqual(calls, [
+			"https://cli-chat-proxy.grok.com/v1/user",
+			"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+			"https://cli-chat-proxy.grok.com/v1/billing",
+		]);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("Grok adapter keeps reliable weekly usage when monthly billing fails", async () => {
+	const original = globalThis.fetch;
+	const calls: string[] = [];
+	globalThis.fetch = async (input) => {
+		const url = String(input);
+		calls.push(url);
+		if (url.endsWith("/v1/user")) {
+			return jsonResponse({ userId: "user_123" });
+		}
+		if (url.includes("format=credits")) {
+			return jsonResponse({
+				config: {
+					isUnifiedBillingUser: true,
+					creditUsagePercent: 40,
+					currentPeriod: {
+						type: "USAGE_PERIOD_TYPE_WEEKLY",
+						end: "2026-09-01T00:00:00Z",
+					},
+				},
+			});
+		}
+		return jsonResponse({ error: "unavailable" }, 500);
+	};
+	try {
+		const report = await requiredAdapter("xai").query(
+			grokAuth(),
+			new AbortController().signal,
+			5_000,
+		);
+		assert.equal(formatUsageStatusline(report), "1w 60%");
+		assert.deepEqual(calls, [
+			"https://cli-chat-proxy.grok.com/v1/user",
+			"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+			"https://cli-chat-proxy.grok.com/v1/billing",
+		]);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("Grok adapter skips monthly billing for legacy weekly credits", async () => {
+	const original = globalThis.fetch;
+	const calls: string[] = [];
+	globalThis.fetch = async (input) => {
+		const url = String(input);
+		calls.push(url);
+		if (url.endsWith("/v1/user")) {
+			return jsonResponse({ userId: "user_123" });
+		}
+		return jsonResponse({
+			config: {
+				creditUsagePercent: 40,
+				currentPeriod: {
+					type: "USAGE_PERIOD_TYPE_WEEKLY",
+					end: "2026-09-01T00:00:00Z",
+				},
+			},
+		});
+	};
+	try {
+		const report = await requiredAdapter("xai").query(
+			grokAuth(),
+			new AbortController().signal,
+			5_000,
+		);
+		assert.equal(formatUsageStatusline(report), "1w 60%");
+		assert.deepEqual(calls, [
+			"https://cli-chat-proxy.grok.com/v1/user",
+			"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+		]);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+function requiredAdapter(id: string) {
+	const adapter = SUPPORTED_ADAPTERS.find((item) => item.id === id);
+	if (!adapter) throw new Error(`Missing test adapter: ${id}`);
+	return adapter;
+}
+
+function grokAuth(): ResolvedUsageAuth {
+	return {
+		actualProviderId: "xai-auth",
+		headers: { Authorization: "Bearer fixture-token" },
+		fingerprint: "fp",
+		secrets: ["fixture-token"],
+		model: { provider: "xai-auth", id: "grok-4" },
+	};
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+	return new Response(JSON.stringify(body), {
+		status,
+		headers: { "content-type": "application/json" },
+	});
+}

@@ -5,6 +5,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	errorMessage,
 	fingerprintResolvedAuth,
+	isAbortError,
 	redactUsageError,
 } from "./core.ts";
 import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
@@ -13,6 +14,8 @@ import {
 	grokRequestHeaders,
 	normalizeGrokBilling,
 	normalizeGrokIdentity,
+	requiresGrokMonthlyQuota,
+	shouldProbeGrokMonthly,
 } from "./providers/grok.ts";
 import { normalizeKimiUsage } from "./providers/kimi.ts";
 import { normalizeOpenCodeGoUsage } from "./providers/opencode-go.ts";
@@ -26,8 +29,9 @@ const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
 const KIMI_USAGE_URL = "https://api.kimi.com/coding/v1/usages";
 const GROK_USER_URL = "https://cli-chat-proxy.grok.com/v1/user";
-const GROK_BILLING_URL =
+const GROK_CREDITS_URL =
 	"https://cli-chat-proxy.grok.com/v1/billing?format=credits";
+const GROK_MONTHLY_URL = "https://cli-chat-proxy.grok.com/v1/billing";
 const MAX_SUCCESS_BODY_BYTES = 64 * 1024;
 const MAX_ERROR_BODY_BYTES = 4 * 1024;
 const PACKAGE_METADATA = createRequire(import.meta.url)("../package.json") as {
@@ -121,15 +125,34 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 				{ headers: grokRequestHeaders() },
 			);
 			const userId = normalizeGrokIdentity(identity);
-			const billing = await fetchProviderJson(
-				GROK_BILLING_URL,
+			const request = { headers: grokRequestHeaders(userId) };
+			const credits = await fetchProviderJson(
+				GROK_CREDITS_URL,
 				auth,
 				signal,
 				timeoutMs,
 				"Grok billing endpoint",
-				{ headers: grokRequestHeaders(userId) },
+				request,
 			);
-			return normalizeGrokBilling(billing, Date.now());
+			const capturedAt = Date.now();
+			const monthlyRequired = requiresGrokMonthlyQuota(credits);
+			let monthly: Record<string, unknown> | null | undefined;
+			if (shouldProbeGrokMonthly(credits)) {
+				try {
+					monthly = await fetchProviderJson(
+						GROK_MONTHLY_URL,
+						auth,
+						signal,
+						timeoutMs,
+						"Grok monthly billing endpoint",
+						request,
+					);
+				} catch (error) {
+					if (isAbortError(error) || monthlyRequired) throw error;
+					monthly = null;
+				}
+			}
+			return normalizeGrokBilling(credits, capturedAt, monthly);
 		},
 	},
 ];

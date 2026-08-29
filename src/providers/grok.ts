@@ -6,6 +6,8 @@ const MAX_USER_ID_LENGTH = 256;
 const MAX_LABEL_LENGTH = 80;
 const MAX_CENTS = 1_000_000_000_000;
 const USER_ID_PATTERN = /^[\x21-\x7e]+$/u;
+const WEEKLY_WINDOW_MINUTES = 10_080;
+const MONTHLY_WINDOW_MINUTES = 43_200;
 // Grok CLI proxy protocol version; independent of this extension's package version.
 const GROK_CLIENT_VERSION = "0.1.0";
 
@@ -34,23 +36,59 @@ export function normalizeGrokIdentity(payload: unknown): string {
 	return userId;
 }
 
+/** Unified SuperGrok accounts may expose their quota only on monthly billing. */
+export function shouldProbeGrokMonthly(creditsPayload: unknown): boolean {
+	const config = billingConfig(creditsPayload);
+	if (!config) return true;
+	return (
+		config.isUnifiedBillingUser === true ||
+		parseCreditsWindow(config) === undefined
+	);
+}
+
+/** A failed monthly request is fatal when credits contain no reliable quota. */
+export function requiresGrokMonthlyQuota(creditsPayload: unknown): boolean {
+	return parseCreditsWindow(billingConfig(creditsPayload)) === undefined;
+}
+
 export function normalizeGrokBilling(
-	payload: unknown,
+	creditsPayload: unknown,
 	capturedAt: number,
+	monthlyPayload?: unknown | null,
 ): UsageReport {
-	const root = asObject(payload);
-	if (!root) throw new Error("Grok billing response was not an object.");
-	const config = root.config === undefined ? undefined : asObject(root.config);
-	if (root.config !== undefined && !config) {
-		throw new Error("Grok billing response contained an invalid config object.");
+	const creditsRoot = asObject(creditsPayload);
+	if (!creditsRoot) throw new Error("Grok billing response was not an object.");
+	const creditsConfig = billingConfig(creditsPayload);
+	const weekly = parseCreditsWindow(creditsConfig);
+
+	const monthlyRoot = readOptionalPayload(
+		monthlyPayload,
+		"Grok monthly billing response was not an object.",
+	);
+	let monthlyConfig: Record<string, unknown> | undefined;
+	if (monthlyRoot !== undefined) {
+		monthlyConfig = billingConfig(monthlyRoot, "skip");
+	} else if (monthlyPayload === undefined && !weekly) {
+		monthlyConfig = creditsConfig;
 	}
-	const included = createIncludedBucket(config);
-	const buckets = included ? [included] : [];
-	const metrics = collectMetrics(config);
-	if (buckets.length === 0 && metrics.length === 0) {
-		throw new Error("Grok billing endpoint returned no displayable usage data.");
+	const monthly = parseMonthlyWindow(monthlyConfig);
+
+	const buckets: UsageBucket[] = [];
+	if (weekly) buckets.push(weekly);
+	if (monthly) buckets.push(monthly);
+	if (buckets.length === 0) {
+		throw new Error("Grok billing endpoint returned no displayable quota window.");
 	}
-	addAccountMetrics(metrics, root);
+
+	const primaryMetrics = collectMetrics(creditsConfig);
+	addAccountMetrics(primaryMetrics, creditsRoot);
+	const extraMetrics =
+		monthlyConfig && monthlyConfig !== creditsConfig
+			? collectMetrics(monthlyConfig)
+			: [];
+	if (monthlyRoot) addAccountMetrics(extraMetrics, monthlyRoot);
+	const metrics = mergeMetrics(primaryMetrics, extraMetrics);
+
 	return {
 		providerId: "xai",
 		providerName: "Grok",
@@ -65,34 +103,94 @@ export function normalizeGrokBilling(
 	};
 }
 
-function createIncludedBucket(
+function readOptionalPayload(
+	payload: unknown | null | undefined,
+	invalidMessage: string,
+): Record<string, unknown> | undefined {
+	if (payload === undefined || payload === null) return undefined;
+	const root = asObject(payload);
+	if (!root) throw new Error(invalidMessage);
+	return root;
+}
+
+function billingConfig(
+	payload: unknown,
+	invalidConfig: "throw" | "skip" = "throw",
+): Record<string, unknown> | undefined {
+	const root = asObject(payload);
+	if (!root) return undefined;
+	if (root.config === undefined) return undefined;
+	const config = asObject(root.config);
+	if (!config) {
+		if (invalidConfig === "skip") return undefined;
+		throw new Error("Grok billing response contained an invalid config object.");
+	}
+	return config;
+}
+
+function parseCreditsWindow(
 	config: Record<string, unknown> | undefined,
 ): UsageBucket | undefined {
-	const percent = boundedPercent(config?.creditUsagePercent);
-	const usedCents = boundedCents(config?.used);
-	const limitCents = boundedCents(config?.monthlyLimit);
-	let used = percent;
-	if (
-		used === undefined &&
-		usedCents !== undefined &&
-		limitCents !== undefined &&
-		limitCents > 0
-	) {
-		used = Math.min(100, (usedCents / limitCents) * 100);
+	if (!config) return undefined;
+	const period = asObject(config.currentPeriod);
+	let used = boundedPercent(config.creditUsagePercent);
+	if (used === undefined && isWeeklyPeriod(period)) {
+		const usedCents = boundedCents(config.used);
+		const limitCents = boundedCents(config.monthlyLimit);
+		if (usedCents !== undefined && limitCents !== undefined && limitCents > 0) {
+			used = Math.min(100, (usedCents / limitCents) * 100);
+		}
 	}
 	if (used === undefined) return undefined;
-	const period = asObject(config?.currentPeriod);
-	const resetsAt = parseTimestamp(period?.end ?? config?.billingPeriodEnd);
+	return percentWindow("weekly", used, config, period, WEEKLY_WINDOW_MINUTES);
+}
+
+function parseMonthlyWindow(
+	config: Record<string, unknown> | undefined,
+): UsageBucket | undefined {
+	if (!config) return undefined;
+	const usedCents = boundedCents(config.used);
+	const limitCents = boundedCents(config.monthlyLimit);
+	if (usedCents === undefined || limitCents === undefined || limitCents <= 0) {
+		return undefined;
+	}
+	const used = Math.min(100, (usedCents / limitCents) * 100);
+	const period = asObject(config.currentPeriod);
+	return percentWindow(
+		"monthly",
+		used,
+		config,
+		isWeeklyPeriod(period) ? undefined : period,
+		MONTHLY_WINDOW_MINUTES,
+	);
+}
+
+function percentWindow(
+	kind: "weekly" | "monthly",
+	used: number,
+	config: Record<string, unknown>,
+	period: Record<string, unknown> | undefined,
+	fallbackMinutes: number,
+): UsageBucket {
 	const periodInfo = parseUsagePeriod(config, period);
 	const bucket: UsageBucket = {
-		id: "included",
-		label: "Included usage",
+		id: kind,
+		label: kind === "monthly" ? "Monthly window" : "Weekly window",
 		used,
 		remaining: 100 - used,
 		limit: 100,
 		unit: "percent",
-		...periodInfo,
+		period: kind,
+		windowMinutes:
+			periodInfo.period === kind
+				? (periodInfo.windowMinutes ?? fallbackMinutes)
+				: fallbackMinutes,
 	};
+	const resetsAt = parseTimestamp(
+		kind === "monthly"
+			? (config.billingPeriodEnd ?? period?.end)
+			: (period?.end ?? config.billingPeriodEnd),
+	);
 	if (resetsAt !== undefined) bucket.resetsAt = resetsAt;
 	return bucket;
 }
@@ -104,10 +202,10 @@ function parseUsagePeriod(
 	const type = currentPeriod?.type;
 	if (typeof type === "string") {
 		if (type.toUpperCase().includes("WEEKLY")) {
-			return { period: "weekly", windowMinutes: 10_080 };
+			return { period: "weekly", windowMinutes: WEEKLY_WINDOW_MINUTES };
 		}
 		if (type.toUpperCase().includes("MONTHLY")) {
-			return { period: "monthly", windowMinutes: 43_200 };
+			return { period: "monthly", windowMinutes: MONTHLY_WINDOW_MINUTES };
 		}
 	}
 	const start = parseTimestamp(
@@ -123,6 +221,14 @@ function parseUsagePeriod(
 		return { period: "monthly", windowMinutes };
 	}
 	return { windowMinutes };
+}
+
+function isWeeklyPeriod(
+	period: Record<string, unknown> | undefined,
+): period is Record<string, unknown> {
+	return (
+		typeof period?.type === "string" && period.type.toUpperCase().includes("WEEK")
+	);
 }
 
 function collectMetrics(
@@ -175,6 +281,21 @@ function addAccountMetrics(
 			value: root.onDemandEnabled ? "on" : "off",
 		});
 	}
+}
+
+function mergeMetrics(
+	primary: UsageMetric[],
+	extra: UsageMetric[],
+): UsageMetric[] {
+	const seen = new Set(primary.map((metric) => metric.id));
+	return [
+		...primary,
+		...extra.filter((metric) => {
+			if (seen.has(metric.id)) return false;
+			seen.add(metric.id);
+			return true;
+		}),
+	];
 }
 
 function addUsdMetric(
