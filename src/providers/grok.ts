@@ -77,7 +77,9 @@ export function normalizeGrokBilling(
 	if (weekly) buckets.push(weekly);
 	if (monthly) buckets.push(monthly);
 	if (buckets.length === 0) {
-		throw new Error("Grok billing endpoint returned no displayable quota window.");
+		throw new Error(
+			"Grok billing endpoint returned no displayable quota window.",
+		);
 	}
 
 	const primaryMetrics = collectMetrics(creditsConfig);
