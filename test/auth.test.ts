@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
 import { verifyCodexStoredOAuthCredential } from "../src/codex-reset-core.ts";
-import { adapterForProvider, resolveUsageAuth } from "../src/query.ts";
+import {
+	adapterForProvider,
+	fetchProviderJson,
+	resolveUsageAuth,
+} from "../src/query.ts";
 
 type ResolveContext = Parameters<typeof resolveUsageAuth>[0];
 
@@ -68,6 +73,47 @@ test("accepts official Kimi runtime auth and forwards only authorization", async
 	assert.deepEqual(auth?.headers, { Authorization: "Bearer fixture-secret" });
 	assert.equal(auth?.actualProviderId, "kimi-coding");
 	assert.equal(auth?.fingerprint.length, 64);
+});
+
+test("uses package metadata for the outbound User-Agent", async () => {
+	const packageMetadata = createRequire(import.meta.url)("../package.json") as {
+		name: string;
+		version: string;
+	};
+	let requestHeaders: Record<string, string> | undefined;
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (_input, init) => {
+		requestHeaders = init?.headers as Record<string, string>;
+		return new Response("{}", {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+	};
+	try {
+		await fetchProviderJson(
+			origin("api.kimi.com", "/coding/v1/usages"),
+			{
+				actualProviderId: "kimi-coding",
+				headers: { Authorization: "Bearer fixture-secret" },
+				fingerprint: "fixture",
+				secrets: ["fixture-secret"],
+				model: {
+					provider: "kimi-coding",
+					id: "test-model",
+					baseUrl: origin("api.kimi.com"),
+				},
+			},
+			new AbortController().signal,
+			1_000,
+			"test usage endpoint",
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+	assert.equal(
+		requestHeaders?.["User-Agent"],
+		`${packageMetadata.name}/${packageMetadata.version}`,
+	);
 });
 
 test("rejects Grok API-key auth when OAuth is required", async () => {

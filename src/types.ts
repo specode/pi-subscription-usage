@@ -42,6 +42,7 @@ export interface UsageReport {
 	source: string;
 	semantics: UsageSemantics;
 	buckets: UsageBucket[];
+	defaultGroupId?: string;
 	metrics: UsageMetric[];
 	notes?: string[];
 }
@@ -59,6 +60,7 @@ export interface UsageProviderAdapter {
 	id: string;
 	displayName: string;
 	providerIds: readonly string[];
+	officialOrigins: readonly string[];
 	semantics: UsageSemantics;
 	requiresOAuth?: boolean;
 	query(

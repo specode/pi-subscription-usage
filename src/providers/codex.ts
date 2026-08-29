@@ -1,6 +1,10 @@
 // Adapted from @narumitw/pi-usage@0.53.0 (MIT).
 import { sanitizeDisplayText } from "../core.ts";
 import type { UsageBucket, UsageMetric, UsageReport } from "../types.ts";
+import {
+	CODEX_DEFAULT_GROUP_ID,
+	CODEX_PROVIDER_ID,
+} from "./codex-constants.ts";
 
 export function normalizeCodexUsage(
 	payload: unknown,
@@ -9,7 +13,13 @@ export function normalizeCodexUsage(
 	const root = asObject(payload);
 	if (!root) throw new Error("Codex usage response was not an object.");
 	const buckets: UsageBucket[] = [];
-	normalizeRateLimitGroup(buckets, "codex", "Codex", root.rate_limit, false);
+	normalizeRateLimitGroup(
+		buckets,
+		CODEX_DEFAULT_GROUP_ID,
+		"Shared Across Models",
+		root.rate_limit,
+		false,
+	);
 	const additional = Array.isArray(root.additional_rate_limits)
 		? root.additional_rate_limits
 		: [];
@@ -34,25 +44,29 @@ export function normalizeCodexUsage(
 	const credits = asObject(root.credits);
 	if (credits?.has_credits === true) {
 		if (credits.unlimited === true) {
-			metrics.push({ id: "credits", label: "Credits", value: "unlimited" });
+			metrics.push({
+				id: "credits",
+				label: "Extra Credit",
+				value: "unlimited",
+			});
 		} else {
 			const balance = asNumber(credits.balance);
 			metrics.push({
 				id: "credits",
-				label: "Credits",
+				label: "Extra Credit",
 				value: balance ?? "available",
 				...(balance === undefined ? {} : { unit: "count" as const }),
 			});
 		}
 	} else if (credits?.has_credits === false) {
-		metrics.push({ id: "credits", label: "Credits", value: "none" });
+		metrics.push({ id: "credits", label: "Extra Credit", value: "none" });
 	}
 	const resetCredits = asObject(root.rate_limit_reset_credits);
 	const resetCount = asNonnegativeInteger(resetCredits?.available_count);
 	if (resetCount !== undefined) {
 		metrics.push({
 			id: "reset-credits",
-			label: "Usage limit resets",
+			label: "Resets Left",
 			value: resetCount,
 			unit: "count",
 		});
@@ -61,8 +75,9 @@ export function normalizeCodexUsage(
 		throw new Error("Codex usage endpoint returned no displayable usage data.");
 	}
 	const planType = asString(root.plan_type);
+	if (planType) metrics.push({ id: "plan", label: "Plan", value: planType });
 	return {
-		providerId: "openai-codex",
+		providerId: CODEX_PROVIDER_ID,
 		providerName: "OpenAI Codex",
 		capturedAt,
 		source: "codex-pi-auth",
@@ -71,8 +86,8 @@ export function normalizeCodexUsage(
 			label: "ChatGPT subscription limits",
 		},
 		buckets,
+		defaultGroupId: CODEX_DEFAULT_GROUP_ID,
 		metrics,
-		...(planType ? { notes: [`Plan: ${planType}`] } : {}),
 	};
 }
 
@@ -105,6 +120,7 @@ function addWindow(
 	if (!value) throw new Error("Codex rate-limit window was not an object.");
 	const used = asNumber(value.used_percent);
 	if (used === undefined) return;
+	const clampedUsed = clampPercent(used);
 	const seconds = asNumber(value.limit_window_seconds);
 	const resetsAt = asNumber(value.reset_at);
 	buckets.push({
@@ -113,8 +129,8 @@ function addWindow(
 		groupId,
 		groupLabel,
 		modelKeys: [groupId, groupLabel],
-		used,
-		remaining: 100 - clampPercent(used),
+		used: clampedUsed,
+		remaining: 100 - clampedUsed,
 		limit: 100,
 		unit: "percent",
 		...(seconds !== undefined && seconds > 0

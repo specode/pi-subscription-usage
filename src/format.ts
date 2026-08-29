@@ -31,9 +31,9 @@ export function formatUsageReport(
 	report: UsageReport,
 	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
 ): string {
-	const sections = bucketSections(report.buckets, displayMode);
+	const sections = bucketSections(report, displayMode);
 	const accountRows: PanelRow[] = report.metrics.map((metric) => ({
-		label: metricLabel(metric),
+		label: metric.label,
 		detail: formatMetric(metric),
 	}));
 	for (const note of report.notes ?? []) accountRows.push(noteRow(note));
@@ -106,13 +106,13 @@ function formatBucket(
 }
 
 function bucketSections(
-	buckets: readonly UsageBucket[],
+	report: UsageReport,
 	displayMode: UsageDisplayMode,
 ): PanelSection[] {
-	if (!buckets.some((bucket) => bucket.groupId)) {
+	if (!report.buckets.some((bucket) => bucket.groupId)) {
 		return [
 			{
-				rows: sortUsageBuckets(buckets).map((bucket) => ({
+				rows: sortUsageBuckets(report.buckets).map((bucket) => ({
 					label: usageWindowLabel(bucket),
 					detail: formatBucket(bucket, displayMode),
 				})),
@@ -120,15 +120,12 @@ function bucketSections(
 		];
 	}
 	const groups = new Map<string, { heading: string; buckets: UsageBucket[] }>();
-	for (const bucket of buckets) {
+	for (const bucket of report.buckets) {
 		const key = bucket.groupId ?? "other";
 		let group = groups.get(key);
 		if (!group) {
 			group = {
-				heading:
-					key === "codex"
-						? "Shared Across Models"
-						: (bucket.groupLabel ?? bucket.groupId ?? "Other Quota"),
+				heading: bucket.groupLabel ?? bucket.groupId ?? "Other Quota",
 				buckets: [],
 			};
 			groups.set(key, group);
@@ -137,8 +134,8 @@ function bucketSections(
 	}
 	return [...groups.entries()]
 		.sort(([leftKey, left], [rightKey, right]) => {
-			if (leftKey === "codex") return -1;
-			if (rightKey === "codex") return 1;
+			if (leftKey === report.defaultGroupId) return -1;
+			if (rightKey === report.defaultGroupId) return 1;
 			return left.heading.localeCompare(right.heading);
 		})
 		.map(([, group]) => ({
@@ -161,34 +158,11 @@ function formatPanelRows(
 	);
 }
 
-function metricLabel(metric: UsageMetric): string {
-	if (metric.id === "reset-credits") return "Resets Left";
-	if (metric.id === "credits") return "Extra Credit";
-	if (metric.id === "included-used") return "Included Used";
-	if (metric.id === "included-limit") return "Included Total";
-	if (metric.id === "on-demand-used") return "On-Demand Used";
-	if (metric.id === "on-demand-cap") return "On-Demand Cap";
-	if (metric.id === "prepaid-balance") return "Prepaid Balance";
-	return metric.label;
-}
-
 function formatMetric(metric: UsageMetric): string {
-	if (metric.id === "reset-credits" && typeof metric.value === "number") {
-		return formatNumber(metric.value);
-	}
 	return formatValue(metric.value, metric.unit);
 }
 
 function noteRow(note: string): PanelRow {
-	if (note.startsWith("Plan: ")) {
-		return { label: "Plan", detail: note.slice("Plan: ".length) };
-	}
-	if (note === "On-demand billing: enabled") {
-		return { label: "On-Demand", detail: "on" };
-	}
-	if (note === "On-demand billing: disabled") {
-		return { label: "On-Demand", detail: "off" };
-	}
 	return { label: "Note", detail: note };
 }
 

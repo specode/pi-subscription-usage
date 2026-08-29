@@ -1,6 +1,6 @@
 {
   "name": "@specode/pi-subscription-usage",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Show subscription quota and Codex reset credits for Codex, OpenCode Go, Grok, and Kimi in Pi",
   "type": "module",
   "license": "MIT",

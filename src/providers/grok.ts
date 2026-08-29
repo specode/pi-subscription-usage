@@ -6,6 +6,18 @@ const MAX_USER_ID_LENGTH = 256;
 const MAX_LABEL_LENGTH = 80;
 const MAX_CENTS = 1_000_000_000_000;
 const USER_ID_PATTERN = /^[\x21-\x7e]+$/u;
+// Grok CLI proxy protocol version; independent of this extension's package version.
+const GROK_CLIENT_VERSION = "0.1.0";
+
+export function grokRequestHeaders(userId?: string): Record<string, string> {
+	return {
+		"X-XAI-Token-Auth": "xai-grok-cli",
+		"x-grok-client-version": GROK_CLIENT_VERSION,
+		"x-grok-client-mode":
+			process.stdin.isTTY && process.stdout.isTTY ? "interactive" : "headless",
+		...(userId ? { "x-userid": userId } : {}),
+	};
+}
 
 export function normalizeGrokIdentity(payload: unknown): string {
 	const userId = asObject(payload)?.userId;
@@ -38,8 +50,8 @@ export function normalizeGrokBilling(
 	if (buckets.length === 0 && metrics.length === 0) {
 		throw new Error("Grok billing endpoint returned no displayable usage data.");
 	}
-	const notes = collectNotes(root);
-	const report: UsageReport = {
+	addAccountMetrics(metrics, root);
+	return {
 		providerId: "xai",
 		providerName: "Grok",
 		capturedAt,
@@ -51,8 +63,6 @@ export function normalizeGrokBilling(
 		buckets,
 		metrics,
 	};
-	if (notes.length > 0) report.notes = notes;
-	return report;
 }
 
 function createIncludedBucket(
@@ -122,46 +132,49 @@ function collectMetrics(
 	addUsdMetric(
 		metrics,
 		"included-used",
-		"Included credits used",
+		"Included Used",
 		boundedCents(config?.used),
 	);
 	addUsdMetric(
 		metrics,
 		"included-limit",
-		"Included credits limit",
+		"Included Total",
 		boundedCents(config?.monthlyLimit),
 	);
 	addUsdMetric(
 		metrics,
 		"on-demand-used",
-		"On-demand credits used",
+		"On-Demand Used",
 		boundedCents(config?.onDemandUsed),
 	);
 	addUsdMetric(
 		metrics,
 		"on-demand-cap",
-		"On-demand credits cap",
+		"On-Demand Cap",
 		boundedCents(config?.onDemandCap),
 	);
 	addUsdMetric(
 		metrics,
 		"prepaid-balance",
-		"Prepaid balance",
+		"Prepaid Balance",
 		boundedCents(config?.prepaidBalance),
 	);
 	return metrics;
 }
 
-function collectNotes(root: Record<string, unknown>): string[] {
-	const notes: string[] = [];
+function addAccountMetrics(
+	metrics: UsageMetric[],
+	root: Record<string, unknown>,
+): void {
 	const tier = boundedLabel(root.subscriptionTier);
-	if (tier) notes.push(`Plan: ${tier}`);
+	if (tier) metrics.push({ id: "plan", label: "Plan", value: tier });
 	if (typeof root.onDemandEnabled === "boolean") {
-		notes.push(
-			`On-demand billing: ${root.onDemandEnabled ? "enabled" : "disabled"}`,
-		);
+		metrics.push({
+			id: "on-demand",
+			label: "On-Demand",
+			value: root.onDemandEnabled ? "on" : "off",
+		});
 	}
-	return notes;
 }
 
 function addUsdMetric(

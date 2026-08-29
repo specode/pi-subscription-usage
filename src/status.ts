@@ -51,10 +51,7 @@ export function buildUsageStatusEvent(
 	model?: UsageModel,
 	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
 ): UsageStatusEvent {
-	const buckets =
-		report.providerId === "openai-codex"
-			? bucketsForCodexModel(report, model)
-			: report.buckets;
+	const buckets = bucketsForModel(report, model);
 	const windows = sortUsageBuckets(buckets).flatMap((bucket) => {
 		const remainingPercent = usagePercentRemaining(bucket);
 		const usedPercent = usagePercentUsed(bucket);
@@ -175,45 +172,50 @@ function usageWindowRank(bucket: UsageBucket): number {
 	return 3;
 }
 
-function bucketsForCodexModel(
+function bucketsForModel(
 	report: UsageReport,
 	model?: UsageModel,
 ): UsageBucket[] {
-	const group = selectCodexGroup(report, model);
+	const hasGroups = report.buckets.some((bucket) => bucket.groupId);
+	const hasModelGroups = report.buckets.some(
+		(bucket) => bucket.modelKeys && bucket.modelKeys.length > 0,
+	);
+	if (!hasGroups || (!report.defaultGroupId && !hasModelGroups)) {
+		return report.buckets;
+	}
+	const group = selectUsageGroup(report, model);
 	return report.buckets.filter(
 		(bucket) => (bucket.groupId ?? bucket.id) === group,
 	);
 }
 
-function selectCodexGroup(
+function selectUsageGroup(
 	report: UsageReport,
 	model?: UsageModel,
 ): string | undefined {
 	const groups = [
 		...new Set(report.buckets.map((bucket) => bucket.groupId ?? bucket.id)),
 	];
-	if (model?.provider === "openai-codex") {
-		const keys = [model.id, model.name]
+	const keys = [model?.id, model?.name]
+		.map(normalizeKey)
+		.filter((value): value is string => Boolean(value));
+	const specificGroups = groups
+		.filter((group) => group !== report.defaultGroupId)
+		.sort((left, right) => right.length - left.length);
+	for (const group of specificGroups) {
+		const bucket = report.buckets.find(
+			(candidate) => (candidate.groupId ?? candidate.id) === group,
+		);
+		const candidates = [group, bucket?.groupLabel, ...(bucket?.modelKeys ?? [])]
 			.map(normalizeKey)
 			.filter((value): value is string => Boolean(value));
-		const specificGroups = groups
-			.filter((group) => group !== "codex")
-			.sort((left, right) => right.length - left.length);
-		for (const group of specificGroups) {
-			const bucket = report.buckets.find(
-				(candidate) => (candidate.groupId ?? candidate.id) === group,
-			);
-			const candidates = [group, bucket?.groupLabel, ...(bucket?.modelKeys ?? [])]
-				.map(normalizeKey)
-				.filter((value): value is string => Boolean(value));
-			if (
-				candidates.some((candidate) => keys.some((key) => key.includes(candidate)))
-			) {
-				return group;
-			}
+		if (
+			candidates.some((candidate) => keys.some((key) => key.includes(candidate)))
+		) {
+			return group;
 		}
 	}
-	return groups.includes("codex") ? "codex" : groups[0];
+	return groups.find((group) => group === report.defaultGroupId) ?? groups[0];
 }
 
 function normalizeKey(value: string | undefined): string | undefined {

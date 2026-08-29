@@ -29,12 +29,13 @@ export function normalizeOpenCodeGoUsage(
 		}
 		const used = asNonnegativeNumber(raw.percent);
 		if (used === undefined) continue;
+		const clampedUsed = clampPercent(used);
 		const resetsAt = asEpochSeconds(raw.resetsAt);
 		buckets.push({
 			id: window.key,
 			label: `${window.label} window`,
-			used,
-			remaining: 100 - clampPercent(used),
+			used: clampedUsed,
+			remaining: 100 - clampedUsed,
 			limit: 100,
 			unit: "percent",
 			windowMinutes: window.windowMinutes,

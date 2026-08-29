@@ -4,6 +4,7 @@ import { formatUsageReport, formatUsageStatusline } from "../src/format.ts";
 import { buildUsageStatusEvent } from "../src/status.ts";
 import { normalizeCodexUsage } from "../src/providers/codex.ts";
 import {
+	grokRequestHeaders,
 	normalizeGrokBilling,
 	normalizeGrokIdentity,
 } from "../src/providers/grok.ts";
@@ -43,11 +44,16 @@ test("normalizes Codex windows and earned resets", () => {
 		},
 		capturedAt,
 	);
+	assert.equal(report.defaultGroupId, "codex");
 	assert.equal(report.buckets[0]?.remaining, 75);
 	assert.equal(report.buckets[1]?.remaining, 50);
 	assert.equal(
 		report.metrics.find((metric) => metric.id === "reset-credits")?.value,
 		2,
+	);
+	assert.equal(
+		report.metrics.find((metric) => metric.id === "plan")?.value,
+		"pro",
 	);
 	assert.equal(formatUsageStatusline(report), "5h 75% · 1w 50%");
 	assert.equal(
@@ -76,6 +82,48 @@ test("normalizes Codex windows and earned resets", () => {
 		}),
 		"5h 10%",
 	);
+	assert.equal(
+		formatUsageStatusline(
+			{ ...report, providerId: "provider-neutral-fixture" },
+			{
+				provider: "provider-neutral-fixture",
+				id: "gpt-5.6-spark",
+				name: "GPT-5.6 Spark",
+			},
+		),
+		"5h 10%",
+	);
+	assert.equal(
+		formatUsageStatusline({
+			...report,
+			defaultGroupId: undefined,
+			buckets: report.buckets.map((bucket) => ({
+				...bucket,
+				modelKeys: undefined,
+			})),
+		}),
+		"5h 75% · 5h 10% · 1w 50%",
+	);
+});
+
+test("clamps invalid Codex percentages while preserving quota invariants", () => {
+	const overLimit = normalizeCodexUsage(
+		{ rate_limit: { primary_window: { used_percent: 125 } } },
+		capturedAt,
+	).buckets[0];
+	assert.deepEqual(
+		[overLimit?.used, overLimit?.remaining, overLimit?.limit],
+		[100, 0, 100],
+	);
+
+	const belowZero = normalizeCodexUsage(
+		{ rate_limit: { primary_window: { used_percent: -10 } } },
+		capturedAt,
+	).buckets[0];
+	assert.deepEqual(
+		[belowZero?.used, belowZero?.remaining, belowZero?.limit],
+		[0, 100, 100],
+	);
 });
 
 test("normalizes OpenCode Go rolling windows", () => {
@@ -102,6 +150,17 @@ test("normalizes OpenCode Go rolling windows", () => {
 		[300, 10_080],
 	);
 	assert.equal(formatUsageStatusline(report), "5h 88% · 1w 0%");
+});
+
+test("clamps invalid OpenCode Go percentages", () => {
+	const report = normalizeOpenCodeGoUsage(
+		{ usage: { rolling: { status: "ok", percent: 125 } } },
+		capturedAt,
+	);
+	assert.deepEqual(
+		[report.buckets[0]?.used, report.buckets[0]?.remaining],
+		[100, 0],
+	);
 });
 
 test("builds provider-neutral status data in 5h/1w/1m order", () => {
@@ -189,6 +248,13 @@ test("normalizes Kimi weekly and rolling quotas", () => {
 });
 
 test("verifies Grok identity before normalizing billing", () => {
+	const requestHeaders = grokRequestHeaders("user_123");
+	assert.equal(requestHeaders["X-XAI-Token-Auth"], "xai-grok-cli");
+	assert.equal(requestHeaders["x-grok-client-version"], "0.1.0");
+	assert.equal(requestHeaders["x-userid"], "user_123");
+	assert.ok(
+		["interactive", "headless"].includes(requestHeaders["x-grok-client-mode"]),
+	);
 	assert.equal(normalizeGrokIdentity({ userId: "user_123" }), "user_123");
 	assert.throws(() => normalizeGrokIdentity({ userId: "bad\nuser" }));
 	const report = normalizeGrokBilling(
@@ -214,9 +280,21 @@ test("verifies Grok identity before normalizing billing", () => {
 		2.5,
 	);
 	assert.equal(report.buckets[0]?.period, "weekly");
+	assert.equal(
+		report.metrics.find((metric) => metric.id === "plan")?.value,
+		"SuperGrok",
+	);
+	assert.equal(
+		report.metrics.find((metric) => metric.id === "on-demand")?.value,
+		"off",
+	);
+	assert.equal(report.notes, undefined);
 	assert.equal(formatUsageStatusline(report), "1w 60%");
+	const panel = formatUsageReport(report);
 	assert.match(
-		formatUsageReport(report),
+		panel,
 		/1w Window +[█░]{12} +60% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
 	);
+	assert.match(panel, /Plan +SuperGrok/u);
+	assert.match(panel, /On-Demand +off/u);
 });

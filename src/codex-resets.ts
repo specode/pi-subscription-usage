@@ -19,6 +19,7 @@ import {
 	resolveUsageAuth,
 } from "./query.ts";
 import type { ResolvedUsageAuth } from "./types.ts";
+import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
 
 const RESET_CREDITS_URL =
 	"https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
@@ -32,13 +33,13 @@ export async function resolveCodexResetAuth(
 	credentialReader: StoredCredentialReader = readStoredCredential,
 ): Promise<ResolvedUsageAuth> {
 	const model = ctx.model;
-	if (model?.provider !== "openai-codex") {
+	if (model?.provider !== CODEX_PROVIDER_ID) {
 		throw new Error(
 			"Codex resets require the current model to use OpenAI Codex.",
 		);
 	}
 	const expectedModel = `${model.provider}/${model.id}`;
-	const adapter = adapterForProvider("openai-codex");
+	const adapter = adapterForProvider(CODEX_PROVIDER_ID);
 	if (!adapter) throw new Error("OpenAI Codex usage support is unavailable.");
 	const auth = await resolveUsageAuth(ctx, adapter, salt);
 	if (`${ctx.model?.provider}/${ctx.model?.id}` !== expectedModel) {
@@ -55,7 +56,7 @@ export async function resolveCodexResetAuth(
 		throw new Error("OpenAI Codex OAuth credentials were incomplete.");
 	const accountId = verifyCodexStoredOAuthCredential(
 		resolvedAccess,
-		credentialReader("openai-codex"),
+		credentialReader(CODEX_PROVIDER_ID),
 	);
 	const authorization = `Bearer ${resolvedAccess}`;
 	const headers = {
@@ -63,7 +64,7 @@ export async function resolveCodexResetAuth(
 		"chatgpt-account-id": accountId,
 	};
 	return {
-		actualProviderId: "openai-codex",
+		actualProviderId: CODEX_PROVIDER_ID,
 		apiKey: resolvedAccess,
 		headers,
 		fingerprint: fingerprintResolvedAuth({ headers }, salt),

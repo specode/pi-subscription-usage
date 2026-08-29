@@ -1,13 +1,16 @@
 // Runtime-auth and origin checks adapted from @narumitw/pi-usage@0.53.0 (MIT).
 import { randomBytes } from "node:crypto";
+import { createRequire } from "node:module";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	errorMessage,
 	fingerprintResolvedAuth,
 	redactUsageError,
 } from "./core.ts";
+import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
 import { normalizeCodexUsage } from "./providers/codex.ts";
 import {
+	grokRequestHeaders,
 	normalizeGrokBilling,
 	normalizeGrokIdentity,
 } from "./providers/grok.ts";
@@ -27,6 +30,11 @@ const GROK_BILLING_URL =
 	"https://cli-chat-proxy.grok.com/v1/billing?format=credits";
 const MAX_SUCCESS_BODY_BYTES = 64 * 1024;
 const MAX_ERROR_BODY_BYTES = 4 * 1024;
+const PACKAGE_METADATA = createRequire(import.meta.url)("../package.json") as {
+	name: string;
+	version: string;
+};
+const USER_AGENT = `${PACKAGE_METADATA.name}/${PACKAGE_METADATA.version}`;
 
 type PiModel = NonNullable<ExtensionContext["model"]>;
 
@@ -34,9 +42,10 @@ export const AUTH_FINGERPRINT_SALT = randomBytes(32);
 
 export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 	{
-		id: "openai-codex",
+		id: CODEX_PROVIDER_ID,
 		displayName: "OpenAI Codex",
-		providerIds: ["openai-codex"],
+		providerIds: [CODEX_PROVIDER_ID],
+		officialOrigins: ["https://chatgpt.com"],
 		semantics: {
 			kind: "consumer-subscription",
 			label: "ChatGPT subscription limits",
@@ -58,6 +67,7 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 		id: "opencode-go",
 		displayName: "OpenCode Go",
 		providerIds: ["opencode-go"],
+		officialOrigins: ["https://opencode.ai"],
 		semantics: { kind: "consumer-subscription", label: "OpenCode Go plan usage" },
 		async query(auth, signal, timeoutMs) {
 			return normalizeOpenCodeGoUsage(
@@ -76,6 +86,7 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 		id: "kimi-coding",
 		displayName: "Kimi Coding",
 		providerIds: ["kimi-coding"],
+		officialOrigins: ["https://api.kimi.com"],
 		semantics: { kind: "consumer-subscription", label: "Kimi Coding plan usage" },
 		async query(auth, signal, timeoutMs) {
 			return normalizeKimiUsage(
@@ -94,6 +105,7 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 		id: "xai",
 		displayName: "Grok",
 		providerIds: ["xai", "xai-auth"],
+		officialOrigins: ["https://api.x.ai", "https://cli-chat-proxy.grok.com"],
 		semantics: {
 			kind: "consumer-subscription",
 			label: "SuperGrok subscription usage",
@@ -106,7 +118,7 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 				signal,
 				timeoutMs,
 				"Grok identity endpoint",
-				{ headers: grokHeaders() },
+				{ headers: grokRequestHeaders() },
 			);
 			const userId = normalizeGrokIdentity(identity);
 			const billing = await fetchProviderJson(
@@ -115,7 +127,7 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 				signal,
 				timeoutMs,
 				"Grok billing endpoint",
-				{ headers: grokHeaders(userId) },
+				{ headers: grokRequestHeaders(userId) },
 			);
 			return normalizeGrokBilling(billing, Date.now());
 		},
@@ -139,14 +151,14 @@ export async function resolveUsageAuth(
 	if (
 		current &&
 		adapter.providerIds.includes(current.provider) &&
-		!hasOfficialOrigin(current.baseUrl, current.provider)
+		!hasOfficialOrigin(current.baseUrl, adapter)
 	) {
 		throw new Error(
 			`${adapter.displayName} usage cannot send a custom provider credential to an official usage endpoint.`,
 		);
 	}
 	const candidates = candidateModels(ctx, adapter.providerIds).filter(
-		(candidate) => hasOfficialOrigin(candidate.baseUrl, candidate.provider),
+		(candidate) => hasOfficialOrigin(candidate.baseUrl, adapter),
 	);
 	const currentModel =
 		current && adapter.providerIds.includes(current.provider)
@@ -166,10 +178,7 @@ export async function resolveUsageAuth(
 	}
 	const result = await ctx.modelRegistry.getProviderAuth(model.provider);
 	if (!result) return undefined;
-	if (
-		result.auth.baseUrl &&
-		!hasOfficialOrigin(result.auth.baseUrl, model.provider)
-	) {
+	if (result.auth.baseUrl && !hasOfficialOrigin(result.auth.baseUrl, adapter)) {
 		throw new Error(
 			`${adapter.displayName} usage cannot send a proxy-resolved credential to an official usage endpoint.`,
 		);
@@ -232,7 +241,7 @@ export async function fetchProviderJson(
 	try {
 		const headers: Record<string, string> = {
 			Accept: "application/json",
-			"User-Agent": "@specode/pi-subscription-usage/0.1.0",
+			"User-Agent": USER_AGENT,
 			...auth.headers,
 			...request.headers,
 		};
@@ -348,21 +357,11 @@ function candidateModels(
 
 function hasOfficialOrigin(
 	value: string | undefined,
-	providerId: string,
+	adapter: UsageProviderAdapter,
 ): boolean {
 	if (!value) return false;
 	try {
-		const origin = new URL(value).origin;
-		if (providerId === "openai-codex") return origin === "https://chatgpt.com";
-		if (providerId === "opencode-go") return origin === "https://opencode.ai";
-		if (providerId === "kimi-coding") return origin === "https://api.kimi.com";
-		if (providerId === "xai" || providerId === "xai-auth") {
-			return (
-				origin === "https://api.x.ai" ||
-				origin === "https://cli-chat-proxy.grok.com"
-			);
-		}
-		return false;
+		return adapter.officialOrigins.includes(new URL(value).origin);
 	} catch {
 		return false;
 	}
@@ -377,14 +376,4 @@ function headerValue(
 			([candidate]) => candidate.toLowerCase() === name.toLowerCase(),
 		)?.[1] ?? undefined
 	);
-}
-
-function grokHeaders(userId?: string): Record<string, string> {
-	return {
-		"X-XAI-Token-Auth": "xai-grok-cli",
-		"x-grok-client-version": "0.1.0",
-		"x-grok-client-mode":
-			process.stdin.isTTY && process.stdout.isTTY ? "interactive" : "headless",
-		...(userId ? { "x-userid": userId } : {}),
-	};
 }

@@ -31,6 +31,7 @@ import {
 	resolveCodexResetAuth,
 } from "./codex-resets.ts";
 import { formatProviderState } from "./format.ts";
+import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
 import {
 	buildUsageStatusEvent,
 	formatUsageStatusline,
@@ -113,6 +114,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 	function scheduleStatusRefresh(
 		ctx: ExtensionContext,
 		model: UsageModel,
+		delayMs = CACHE_TTL_MS,
 	): void {
 		clearStatusTimer();
 		const generation = statusGeneration;
@@ -120,7 +122,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			statusTimer = undefined;
 			if (!sessionActive || generation !== statusGeneration) return;
 			startStatusRefresh(ctx, model, true);
-		}, CACHE_TTL_MS);
+		}, delayMs);
 	}
 
 	function publishStatus(
@@ -336,6 +338,11 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		const controller = new AbortController();
 		statusController = controller;
 		activeControllers.add(controller);
+		const refreshIsCurrent = (): boolean =>
+			sessionActive &&
+			generation === statusGeneration &&
+			!controller.signal.aborted &&
+			modelIdentity(ctx.model) === modelIdentity(model);
 		try {
 			safeSetStatus(ctx, "usage …");
 			const outcome = await queryCurrentState(
@@ -345,14 +352,28 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				controller.signal,
 			);
 			if (
-				!sessionActive ||
-				generation !== statusGeneration ||
-				controller.signal.aborted ||
+				!refreshIsCurrent() ||
 				!(await outcomeStillCurrent(ctx, model, outcome, controller.signal))
 			) {
 				return;
 			}
 			publishStatus(ctx, outcome, model, true);
+		} catch (error) {
+			if (isAbortError(error) || !refreshIsCurrent()) return;
+			try {
+				emitUnavailableUsage();
+			} catch {
+				// A status consumer must not stop future refreshes.
+			}
+			if (!refreshIsCurrent()) return;
+			try {
+				safeSetStatus(ctx, "usage error");
+			} catch {
+				// Error reporting must not stop future refreshes.
+			}
+			if (refreshIsCurrent()) {
+				scheduleStatusRefresh(ctx, model, FAILURE_BACKOFF_MS);
+			}
 		} finally {
 			activeControllers.delete(controller);
 			if (statusController === controller) statusController = undefined;
@@ -364,10 +385,8 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		model: UsageModel | undefined,
 		force: boolean,
 	): void {
-		void refreshCurrentStatus(ctx, model, force).catch((error) => {
-			if (isAbortError(error) || !sessionActive) return;
-			emitUnavailableUsage();
-			safeSetStatus(ctx, "usage error");
+		void refreshCurrentStatus(ctx, model, force).catch(() => {
+			// Unsupported-model cleanup is best effort during UI teardown.
 		});
 	}
 
@@ -377,7 +396,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		controller: AbortController,
 	): Promise<StableCurrent | undefined> {
 		if (
-			ctx.model?.provider !== "openai-codex" ||
+			ctx.model?.provider !== CODEX_PROVIDER_ID ||
 			current.outcome.state.status !== "ready"
 		) {
 			ctx.ui.notify(
@@ -449,7 +468,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 					controller.signal,
 					QUERY_TIMEOUT_MS,
 				);
-				cache.clearProvider("openai-codex");
+				cache.clearProvider(CODEX_PROVIDER_ID);
 				failureBackoff.clear();
 				const refreshed = await queryStableCurrent(ctx, true, controller.signal);
 				if (refreshed?.model) {
@@ -498,7 +517,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				publishStatus(ctx, current.outcome, current.model, sessionActive);
 			}
 			if (
-				ctx.model?.provider !== "openai-codex" ||
+				ctx.model?.provider !== CODEX_PROVIDER_ID ||
 				current.outcome.state.status !== "ready"
 			) {
 				return;
