@@ -249,6 +249,7 @@ test("builds provider-neutral status data in 5h/1w/1m order", () => {
 test("normalizes Kimi weekly and rolling quotas", () => {
 	const report = normalizeKimiUsage(
 		{
+			user: { membership: { level: "LEVEL_ADVANCED" } },
 			usage: {
 				limit: 1_000,
 				used: 250,
@@ -272,6 +273,10 @@ test("normalizes Kimi weekly and rolling quotas", () => {
 	assert.equal(report.buckets[0]?.id, "weekly");
 	assert.equal(report.buckets[1]?.label, "5h window");
 	assert.equal(report.buckets[1]?.remaining, 80);
+	assert.deepEqual(
+		report.metrics.map((metric) => [metric.id, metric.value]),
+		[["plan", "Allegro"]],
+	);
 	assert.equal(formatUsageStatusline(report), "5h 80% · 1w 75%");
 	assert.equal(
 		formatUsageStatusline(report, undefined, "used"),
@@ -285,6 +290,23 @@ test("normalizes Kimi weekly and rolling quotas", () => {
 		formatUsageReport(report, "used"),
 		/1w Window +[█░]{12} +25% used · 250\/1000/u,
 	);
+	assert.match(
+		formatUsageReport(report),
+		/\n\n {2}Account:\n {4}Plan +Allegro/u,
+	);
+});
+
+test("preserves unknown Kimi membership levels without prototype lookup", () => {
+	for (const level of ["LEVEL_FUTURE", "constructor", "__proto__"]) {
+		const report = normalizeKimiUsage(
+			{
+				user: { membership: { level } },
+				usage: { limit: 100, used: 10, remaining: 90 },
+			},
+			capturedAt,
+		);
+		assert.equal(report.metrics[0]?.value, level);
+	}
 });
 
 test("verifies Grok identity before normalizing billing", () => {
@@ -335,6 +357,7 @@ test("verifies Grok identity before normalizing billing", () => {
 		panel,
 		/1w Window +[█░]{12} +60% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
 	);
+	assert.match(panel, /\n\n {2}Account:\n {4}Included Used/u);
 	assert.match(panel, /Plan +SuperGrok/u);
 	assert.match(panel, /On-Demand +off/u);
 });

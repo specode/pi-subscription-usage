@@ -1,5 +1,16 @@
 // Adapted from @sumhou/pi-kimi-usage@1.0.1 (MIT).
-import type { UsageBucket, UsageReport } from "../types.ts";
+import { sanitizeDisplayText } from "../core.ts";
+import type { UsageBucket, UsageMetric, UsageReport } from "../types.ts";
+
+const MAX_PLAN_LEVEL_LENGTH = 80;
+const KIMI_PLAN_NAMES: Readonly<Record<string, string>> = {
+	LEVEL_FREE: "Free",
+	LEVEL_BASIC: "Adagio",
+	LEVEL_STANDARD: "Moderato",
+	LEVEL_INTERMEDIATE: "Allegretto",
+	LEVEL_ADVANCED: "Allegro",
+	LEVEL_PREMIUM: "Vivace",
+};
 
 export function normalizeKimiUsage(
 	payload: unknown,
@@ -38,6 +49,9 @@ export function normalizeKimiUsage(
 	if (buckets.length === 0) {
 		throw new Error("Kimi usage endpoint returned no displayable quota data.");
 	}
+	const metrics: UsageMetric[] = [];
+	const plan = kimiPlanName(root);
+	if (plan) metrics.push({ id: "plan", label: "Plan", value: plan });
 	return {
 		providerId: "kimi-coding",
 		providerName: "Kimi Coding",
@@ -45,8 +59,18 @@ export function normalizeKimiUsage(
 		source: "kimi-coding-usage",
 		semantics: { kind: "consumer-subscription", label: "Kimi Coding plan usage" },
 		buckets,
-		metrics: [],
+		metrics,
 	};
+}
+
+function kimiPlanName(root: Record<string, unknown>): string | undefined {
+	const membership = asObject(asObject(root.user)?.membership);
+	if (typeof membership?.level !== "string") return undefined;
+	const level = sanitizeDisplayText(membership.level, MAX_PLAN_LEVEL_LENGTH);
+	if (!level) return undefined;
+	return Object.hasOwn(KIMI_PLAN_NAMES, level)
+		? KIMI_PLAN_NAMES[level]
+		: level;
 }
 
 function parseQuota(

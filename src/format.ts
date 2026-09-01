@@ -48,8 +48,12 @@ export function formatUsageReport(
 	const grouped = sections.some((section) => Boolean(section.heading));
 	const lines = [report.providerName];
 	if (!grouped) {
-		const rows = [...sections.flatMap((section) => section.rows), ...accountRows];
+		const rows = sections.flatMap((section) => section.rows);
 		lines.push(...formatPanelRows(rows, labelWidth, 2));
+		if (accountRows.length > 0) {
+			lines.push("", "  Account:");
+			lines.push(...formatPanelRows(accountRows, labelWidth, 4));
+		}
 		return lines.join("\n");
 	}
 	for (const section of sections) {
