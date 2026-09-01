@@ -9,6 +9,7 @@ import {
 export function normalizeCodexUsage(
 	payload: unknown,
 	capturedAt: number,
+	accountEmail?: string,
 ): UsageReport {
 	const root = asObject(payload);
 	if (!root) throw new Error("Codex usage response was not an object.");
@@ -74,8 +75,8 @@ export function normalizeCodexUsage(
 	if (buckets.length === 0 && metrics.length === 0) {
 		throw new Error("Codex usage endpoint returned no displayable usage data.");
 	}
-	const planType = asString(root.plan_type);
-	if (planType) metrics.push({ id: "plan", label: "Plan", value: planType });
+	addAccountMetrics(metrics, accountEmail, root.plan_type);
+	sortAccountMetrics(metrics);
 	return {
 		providerId: CODEX_PROVIDER_ID,
 		providerName: "OpenAI Codex",
@@ -89,6 +90,53 @@ export function normalizeCodexUsage(
 		defaultGroupId: CODEX_DEFAULT_GROUP_ID,
 		metrics,
 	};
+}
+
+export function codexEmailFromAuthorization(
+	authorization: string | undefined,
+): string | undefined {
+	const match = /^Bearer\s+(\S+)$/iu.exec(authorization?.trim() ?? "");
+	const accessToken = match?.[1];
+	if (!accessToken) return undefined;
+	try {
+		const parts = accessToken.split(".");
+		if (parts.length !== 3 || !parts[1]) return undefined;
+		const payload = asObject(
+			JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")),
+		);
+		const profile = asObject(payload?.["https://api.openai.com/profile"]);
+		return asEmail(profile?.email) ?? asEmail(payload?.email);
+	} catch {
+		return undefined;
+	}
+}
+
+function addAccountMetrics(
+	metrics: UsageMetric[],
+	accountEmail: string | undefined,
+	planTypeValue: unknown,
+): void {
+	const email = asEmail(accountEmail);
+	if (email) metrics.unshift({ id: "email", label: "Email", value: email });
+	const planType = asString(planTypeValue);
+	if (!planType) return;
+	metrics.push({
+		id: "plan",
+		label: "Plan",
+		value: planType.toLowerCase() === "pro" ? "Pro" : planType,
+	});
+}
+
+function sortAccountMetrics(metrics: UsageMetric[]): void {
+	const order = ["email", "plan", "reset-credits", "credits"];
+	metrics.sort((left, right) => {
+		const leftRank = order.indexOf(left.id);
+		const rightRank = order.indexOf(right.id);
+		return (
+			(leftRank < 0 ? order.length : leftRank) -
+			(rightRank < 0 ? order.length : rightRank)
+		);
+	});
 }
 
 function normalizeRateLimitGroup(
@@ -150,6 +198,12 @@ function asString(value: unknown): string | undefined {
 	return typeof value === "string"
 		? sanitizeDisplayText(value, 160) || undefined
 		: undefined;
+}
+
+function asEmail(value: unknown): string | undefined {
+	if (typeof value !== "string" || value.length > 254) return undefined;
+	const email = sanitizeDisplayText(value, 254).toLowerCase();
+	return /^[^\s@]+@[^\s@]+$/u.test(email) ? email : undefined;
 }
 
 function asNumber(value: unknown): number | undefined {

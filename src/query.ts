@@ -9,7 +9,10 @@ import {
 	redactUsageError,
 } from "./core.ts";
 import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
-import { normalizeCodexUsage } from "./providers/codex.ts";
+import {
+	codexEmailFromAuthorization,
+	normalizeCodexUsage,
+} from "./providers/codex.ts";
 import {
 	grokRequestHeaders,
 	normalizeGrokBilling,
@@ -64,6 +67,7 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 					"Codex usage endpoint",
 				),
 				Date.now(),
+				codexEmailFromAuthorization(auth.headers.Authorization),
 			);
 		},
 	},

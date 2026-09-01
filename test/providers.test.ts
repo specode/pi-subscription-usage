@@ -3,7 +3,10 @@ import test from "node:test";
 import { formatUsageReport, formatUsageStatusline } from "../src/format.ts";
 import { SUPPORTED_ADAPTERS } from "../src/query.ts";
 import { buildUsageStatusEvent } from "../src/status.ts";
-import { normalizeCodexUsage } from "../src/providers/codex.ts";
+import {
+	codexEmailFromAuthorization,
+	normalizeCodexUsage,
+} from "../src/providers/codex.ts";
 import type { ResolvedUsageAuth } from "../src/types.ts";
 import {
 	grokRequestHeaders,
@@ -21,6 +24,7 @@ test("normalizes Codex windows and earned resets", () => {
 	const report = normalizeCodexUsage(
 		{
 			plan_type: "pro",
+			credits: { has_credits: false },
 			rate_limit: {
 				primary_window: {
 					used_percent: 25,
@@ -47,17 +51,26 @@ test("normalizes Codex windows and earned resets", () => {
 			],
 		},
 		capturedAt,
+		"User@Example.com",
 	);
 	assert.equal(report.defaultGroupId, "codex");
 	assert.equal(report.buckets[0]?.remaining, 75);
 	assert.equal(report.buckets[1]?.remaining, 50);
+	assert.deepEqual(
+		report.metrics.map((metric) => metric.id),
+		["email", "plan", "reset-credits", "credits"],
+	);
 	assert.equal(
 		report.metrics.find((metric) => metric.id === "reset-credits")?.value,
 		2,
 	);
 	assert.equal(
+		report.metrics.find((metric) => metric.id === "email")?.value,
+		"user@example.com",
+	);
+	assert.equal(
 		report.metrics.find((metric) => metric.id === "plan")?.value,
-		"pro",
+		"Pro",
 	);
 	assert.equal(formatUsageStatusline(report), "5h 75% · 1w 50%");
 	assert.equal(
@@ -77,7 +90,8 @@ test("normalizes Codex windows and earned resets", () => {
 	assert.ok(
 		panel.indexOf("Shared Across Models:") < panel.indexOf("gpt-5.6-spark:"),
 	);
-	assert.match(panel, /Account:\n {4}Resets Left +2/u);
+	assert.match(panel, /Account:\n {4}Email +user@example\.com/u);
+	assert.match(panel, /Plan +Pro/u);
 	assert.equal(
 		formatUsageStatusline(report, {
 			provider: "openai-codex",
@@ -108,6 +122,28 @@ test("normalizes Codex windows and earned resets", () => {
 		}),
 		"5h 75% · 5h 10% · 1w 50%",
 	);
+});
+
+test("extracts the Codex email from the OAuth access token", () => {
+	const nestedPayload = Buffer.from(
+		JSON.stringify({
+			"https://api.openai.com/profile": { email: "User@Example.com" },
+		}),
+	).toString("base64url");
+	assert.equal(
+		codexEmailFromAuthorization(`Bearer header.${nestedPayload}.signature`),
+		"user@example.com",
+	);
+
+	const fallbackPayload = Buffer.from(
+		JSON.stringify({ email: "fallback@example.com" }),
+	).toString("base64url");
+	assert.equal(
+		codexEmailFromAuthorization(`Bearer header.${fallbackPayload}.signature`),
+		"fallback@example.com",
+	);
+	assert.equal(codexEmailFromAuthorization("Bearer malformed"), undefined);
+	assert.equal(codexEmailFromAuthorization(undefined), undefined);
 });
 
 test("clamps invalid Codex percentages while preserving quota invariants", () => {

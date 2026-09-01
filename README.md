@@ -51,7 +51,7 @@ Codex results are grouped by quota domain in this order:
 2. Model-specific sections
 3. `Account`
 
-Windows from different domains are never interleaved. Run `/usage` again whenever you want to refresh; the command does not show refresh, provider-switching, or all-provider menus.
+Windows from different domains are never interleaved. When available, the Codex `Account` section displays the email decoded locally from the active OAuth token. Run `/usage` again whenever you want to refresh; the command does not show refresh, provider-switching, or all-provider menus.
 
 The reset menu appears only when Codex reports redeemable reset credits. Grok's current API exposes quota windows and natural reset times, but no verified manual-reset endpoint or reset-credit count, so the extension never invents a reset action. Grok windows still render through the same `/usage` bars and status event as Codex, OpenCode Go, and Kimi.
 
@@ -96,6 +96,7 @@ Windows are always ordered as `5h / 1w / 1m / other`. Other extensions can consu
 - Codex reset additionally reads Pi's stored OAuth credential through the public `readStoredCredential()` API, solely to verify that it exactly matches the active runtime account before redemption.
 - Grok never reads `~/.grok/auth.json` and never accepts an API key in place of subscription OAuth.
 - Credentials are never written to caches, sessions, the status line, or error messages. Cache keys contain only in-process HMAC fingerprints.
+- The Codex email is decoded locally for the `/usage` account panel and is not included in the footer or structured status event.
 - Credentials are sent only to the corresponding official domains. Custom proxies and custom base URLs are rejected.
 - Codex reset is the only write operation. It is shown only when redeemable credits exist and always requires explicit confirmation.
 
