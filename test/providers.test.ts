@@ -386,14 +386,17 @@ test("maps unified Grok monthly quota onto the shared 1m window", () => {
 		},
 	};
 	assert.equal(shouldProbeGrokMonthly(credits), true);
+	assert.equal(requiresGrokMonthlyQuota(credits), false);
 	const report = normalizeGrokBilling(credits, capturedAt, monthly);
-	assert.equal(report.buckets[0]?.id, "monthly");
-	assert.equal(report.buckets[0]?.period, "monthly");
-	assert.equal(Math.round(report.buckets[0]?.used ?? 0), 70);
-	assert.equal(formatUsageStatusline(report), "1m 30%");
+	assert.equal(report.buckets[0]?.id, "weekly");
+	assert.equal(report.buckets[0]?.used, 0);
+	assert.equal(report.buckets[1]?.id, "monthly");
+	assert.equal(report.buckets[1]?.period, "monthly");
+	assert.equal(Math.round(report.buckets[1]?.used ?? 0), 70);
+	assert.equal(formatUsageStatusline(report), "1w 100% · 1m 30%");
 	assert.match(
 		formatUsageReport(report),
-		/1m Window +[█░]{12} +30% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
+		/1w Window +[█░]{12} +100% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n {2}1m Window +[█░]{12} +30% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
 	);
 	assert.equal(
 		report.metrics.find((metric) => metric.id === "included-used")?.value,
@@ -444,14 +447,64 @@ test("falls back to Grok included cents when weekly percent is omitted", () => {
 	assert.equal(formatUsageStatusline(report), "1w 60%");
 });
 
-test("requires monthly quota when Grok weekly percent is omitted", () => {
+test("treats omitted Grok weekly percent as 0% used after reset", () => {
+	const credits = {
+		subscriptionTier: "SuperGrok Plus",
+		config: {
+			currentPeriod: {
+				type: "USAGE_PERIOD_TYPE_WEEKLY",
+				start: "2026-09-04T08:27:57.977385+00:00",
+				end: "2026-09-11T08:27:57.977385+00:00",
+			},
+			onDemandCap: { val: 0 },
+			onDemandUsed: { val: 0 },
+			prepaidBalance: { val: 0 },
+			isUnifiedBillingUser: true,
+			billingPeriodStart: "2026-09-04T08:27:57.977385+00:00",
+			billingPeriodEnd: "2026-09-11T08:27:57.977385+00:00",
+			historyLen: 0,
+		},
+	};
+	assert.equal(shouldProbeGrokMonthly(credits), true);
+	assert.equal(requiresGrokMonthlyQuota(credits), false);
+	const report = normalizeGrokBilling(credits, capturedAt);
+	assert.equal(report.buckets[0]?.id, "weekly");
+	assert.equal(report.buckets[0]?.used, 0);
+	assert.equal(formatUsageStatusline(report), "1w 100%");
+	assert.equal(
+		report.metrics.find((metric) => metric.id === "plan")?.value,
+		"SuperGrok Plus",
+	);
+});
+
+test("does not treat malformed Grok weekly percent as a reset to 0%", () => {
+	for (const creditUsagePercent of [120, -1, null, "40"]) {
+		const credits = {
+			config: {
+				currentPeriod: {
+					type: "USAGE_PERIOD_TYPE_WEEKLY",
+					end: "2026-09-01T00:00:00Z",
+				},
+				creditUsagePercent,
+			},
+		};
+		assert.equal(shouldProbeGrokMonthly(credits), true);
+		assert.equal(requiresGrokMonthlyQuota(credits), true);
+		assert.throws(
+			() => normalizeGrokBilling(credits, capturedAt),
+			/no displayable quota window/u,
+		);
+	}
+});
+
+test("does not invent Grok weekly 0% from partial included cents", () => {
 	const credits = {
 		config: {
 			currentPeriod: {
 				type: "USAGE_PERIOD_TYPE_WEEKLY",
-				start: "2026-08-20T10:00:00Z",
 				end: "2026-09-01T00:00:00Z",
 			},
+			used: { val: 400 },
 		},
 	};
 	assert.equal(shouldProbeGrokMonthly(credits), true);
@@ -462,7 +515,7 @@ test("requires monthly quota when Grok weekly percent is omitted", () => {
 	);
 });
 
-test("does not invent Grok weekly usage from a zero-limit monthly response", () => {
+test("keeps zeroed Grok weekly usage when monthly limit is unusable", () => {
 	const credits = {
 		config: {
 			isUnifiedBillingUser: true,
@@ -473,27 +526,22 @@ test("does not invent Grok weekly usage from a zero-limit monthly response", () 
 			},
 		},
 	};
-	assert.throws(
-		() =>
-			normalizeGrokBilling(credits, capturedAt, {
-				config: {
-					monthlyLimit: { val: 0 },
-					used: { val: 500 },
-				},
-			}),
-		/no displayable quota window/u,
-	);
+	const report = normalizeGrokBilling(credits, capturedAt, {
+		config: {
+			monthlyLimit: { val: 0 },
+			used: { val: 500 },
+		},
+	});
+	assert.equal(report.buckets.length, 1);
+	assert.equal(report.buckets[0]?.id, "weekly");
+	assert.equal(report.buckets[0]?.used, 0);
+	assert.equal(formatUsageStatusline(report), "1w 100%");
 });
 
-test("rejects Grok reports with metrics but no quota window", () => {
+test("still rejects Grok reports that have neither a weekly period nor monthly cents", () => {
 	const credits = {
 		config: {
 			isUnifiedBillingUser: true,
-			currentPeriod: {
-				type: "USAGE_PERIOD_TYPE_WEEKLY",
-				start: "2026-08-20T10:00:00Z",
-				end: "2026-09-01T00:00:00Z",
-			},
 			prepaidBalance: { val: 250 },
 		},
 	};
@@ -577,7 +625,47 @@ test("Grok adapter probes monthly billing for unified accounts", async () => {
 			new AbortController().signal,
 			5_000,
 		);
-		assert.equal(formatUsageStatusline(report), "1m 30%");
+		assert.equal(formatUsageStatusline(report), "1w 100% · 1m 30%");
+		assert.deepEqual(calls, [
+			"https://cli-chat-proxy.grok.com/v1/user",
+			"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+			"https://cli-chat-proxy.grok.com/v1/billing",
+		]);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("Grok adapter keeps zeroed weekly usage when monthly billing fails", async () => {
+	const original = globalThis.fetch;
+	const calls: string[] = [];
+	globalThis.fetch = async (input) => {
+		const url = String(input);
+		calls.push(url);
+		if (url.endsWith("/v1/user")) {
+			return jsonResponse({ userId: "user_123" });
+		}
+		if (url.includes("format=credits")) {
+			return jsonResponse({
+				config: {
+					isUnifiedBillingUser: true,
+					currentPeriod: {
+						type: "USAGE_PERIOD_TYPE_WEEKLY",
+						end: "2026-09-01T00:00:00Z",
+					},
+					prepaidBalance: { val: 250 },
+				},
+			});
+		}
+		return jsonResponse({ error: "unavailable" }, 500);
+	};
+	try {
+		const report = await requiredAdapter("xai").query(
+			grokAuth(),
+			new AbortController().signal,
+			5_000,
+		);
+		assert.equal(formatUsageStatusline(report), "1w 100%");
 		assert.deepEqual(calls, [
 			"https://cli-chat-proxy.grok.com/v1/user",
 			"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
@@ -601,10 +689,6 @@ test("Grok adapter surfaces a required monthly billing failure", async () => {
 			return jsonResponse({
 				config: {
 					isUnifiedBillingUser: true,
-					currentPeriod: {
-						type: "USAGE_PERIOD_TYPE_WEEKLY",
-						end: "2026-09-01T00:00:00Z",
-					},
 					prepaidBalance: { val: 250 },
 				},
 			});

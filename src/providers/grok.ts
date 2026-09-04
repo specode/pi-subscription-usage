@@ -141,6 +141,15 @@ function parseCreditsWindow(
 		const limitCents = boundedCents(config.monthlyLimit);
 		if (usedCents !== undefined && limitCents !== undefined && limitCents > 0) {
 			used = Math.min(100, (usedCents / limitCents) * 100);
+		} else if (
+			config.creditUsagePercent === undefined &&
+			config.used === undefined &&
+			config.monthlyLimit === undefined
+		) {
+			// Proto3 JSON omits creditUsagePercent when it is 0, which happens
+			// at weekly reset. Official Grok CLI still treats that as 0% used.
+			// Only do this when the fields are absent, not present-but-invalid.
+			used = 0;
 		}
 	}
 	if (used === undefined) return undefined;

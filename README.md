@@ -8,7 +8,7 @@ Supported providers:
 
 - **OpenAI Codex** — 5-hour and weekly quota, model-specific quota, and confirmed reset-credit redemption.
 - **OpenCode Go** — 5-hour, weekly, and monthly windows.
-- **Grok** — weekly and/or monthly quota using only Pi's `xai` / `xai-auth` OAuth credentials, with account identity verification. Unified SuperGrok billing is read from the default monthly endpoint when `?format=credits` omits window percents. Windows use the same `5h / 1w / 1m` status format as other providers.
+- **Grok** — weekly and/or monthly quota using only Pi's `xai` / `xai-auth` OAuth credentials, with account identity verification. A weekly `currentPeriod` with an omitted `creditUsagePercent` is treated as 0% used (proto3 omits zero after reset). Unified SuperGrok billing is still probed from the default monthly endpoint, but that probe is no longer required when the weekly window is already displayable. Windows use the same `5h / 1w / 1m` status format as other providers.
 - **Kimi Coding** — 5-hour and weekly windows, plus the membership plan reported by the usage API.
 
 The extension does not implement or modify Codex Fast mode and never rewrites model requests.
