@@ -45,11 +45,9 @@ export function usageAmount(
 		: Math.max(0, bucket.limit - opposite);
 }
 
+/** Integer presentation only; keep the original number for semantic decisions. */
 export function formatUsagePercent(value: number): string {
-	const hundredths = Math.round(clampPercent(value) * 100) / 100;
-	return Number.isInteger(hundredths)
-		? String(hundredths)
-		: hundredths.toFixed(2);
+	return String(Math.round(clampPercent(value)));
 }
 
 function clampPercent(value: number): number {

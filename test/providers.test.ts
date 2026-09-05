@@ -326,9 +326,24 @@ test("keeps Kimi weekly quota when remaining is omitted", () => {
 		formatUsageStatusline(report, undefined, "used"),
 		"5h 19% · 1w 100%",
 	);
+	assert.equal(formatUsageStatusline(report), "5h 81% · 1w 0%");
+	assert.match(
+		formatUsageReport(report, "used"),
+		/1w Window +[█░]{12} +100% used/u,
+	);
+	assert.match(formatUsageReport(report), /1w Window +[█░]{12} +0% left/u);
+	const event = buildUsageStatusEvent(report);
+	assert.equal(event.status, "ready");
+	if (event.status === "ready") {
+		assert.deepEqual(
+			event.windows.map((window) => window.label),
+			["5h", "1w"],
+		);
+		assert.equal(event.windows[1]?.remainingPercent, 0);
+	}
 });
 
-test("preserves Kimi fractional percentages instead of rounding them away", () => {
+test("rounds Kimi display to integers while preserving numeric precision", () => {
 	const report = normalizeKimiUsage(
 		{
 			usage: {
@@ -354,11 +369,38 @@ test("preserves Kimi fractional percentages instead of rounding them away", () =
 	assert.equal(report.buckets[1]?.used, 18.86);
 	assert.equal(
 		formatUsageStatusline(report, undefined, "used"),
-		"5h 18.86% · 1w 99.96%",
+		"5h 19% · 1w 100%",
 	);
-	assert.equal(formatUsageStatusline(report), "5h 81.14% · 1w 0.04%");
-	assert.match(formatUsageReport(report, "used"), /18\.86% used/u);
-	assert.match(formatUsageReport(report, "used"), /99\.96% used/u);
+	assert.equal(formatUsageStatusline(report), "5h 81% · 1w 0%");
+	assert.match(formatUsageReport(report, "used"), /19% used/u);
+	assert.match(formatUsageReport(report, "used"), /100% used/u);
+	const event = buildUsageStatusEvent(report, undefined, "used");
+	assert.equal(event.status, "ready");
+	if (event.status === "ready") {
+		assert.deepEqual(
+			event.windows.map((window) => window.displayPercent),
+			[18.86, 99.96],
+		);
+	}
+});
+
+test("derives missing Kimi used without treating invalid fields as missing", () => {
+	const report = normalizeKimiUsage(
+		{ usage: { limit: 100, remaining: 100 } },
+		capturedAt,
+	);
+	assert.equal(report.buckets[0]?.used, 0);
+	for (const invalid of [null, "", " ", "bad", NaN, Infinity, false, -1]) {
+		for (const usage of [
+			{ limit: 100, used: invalid, remaining: 100 },
+			{ limit: 100, used: 100, remaining: invalid },
+		]) {
+			assert.throws(
+				() => normalizeKimiUsage({ usage }, capturedAt),
+				/no displayable quota/u,
+			);
+		}
+	}
 });
 
 test("preserves unknown Kimi membership levels without prototype lookup", () => {
@@ -458,10 +500,10 @@ test("maps unified Grok monthly quota onto the shared 1m window", () => {
 	assert.equal(report.buckets[1]?.id, "monthly");
 	assert.equal(report.buckets[1]?.period, "monthly");
 	assert.equal(Math.round(report.buckets[1]?.used ?? 0), 70);
-	assert.equal(formatUsageStatusline(report), "1w 100% · 1m 29.68%");
+	assert.equal(formatUsageStatusline(report), "1w 100% · 1m 30%");
 	assert.match(
 		formatUsageReport(report),
-		/1w Window +[█░]{12} +100% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n {2}1m Window +[█░]{12} +29\.68% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
+		/1w Window +[█░]{12} +100% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n {2}1m Window +[█░]{12} +30% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
 	);
 	assert.equal(
 		report.metrics.find((metric) => metric.id === "included-used")?.value,
@@ -690,7 +732,7 @@ test("Grok adapter probes monthly billing for unified accounts", async () => {
 			new AbortController().signal,
 			5_000,
 		);
-		assert.equal(formatUsageStatusline(report), "1w 100% · 1m 29.68%");
+		assert.equal(formatUsageStatusline(report), "1w 100% · 1m 30%");
 		assert.deepEqual(calls, [
 			"https://cli-chat-proxy.grok.com/v1/user",
 			"https://cli-chat-proxy.grok.com/v1/billing?format=credits",

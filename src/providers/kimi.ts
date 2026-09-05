@@ -80,7 +80,13 @@ function parseQuota(
 	let used = asFiniteNumber(record.used);
 	let remaining = asFiniteNumber(record.remaining);
 	if (limit === undefined || limit <= 0) return undefined;
-	// Kimi omits remaining when used has rounded up to the limit.
+	// Missing fields can be derived; present-but-invalid data must not become zero.
+	if (
+		(record.used !== undefined && used === undefined) ||
+		(record.remaining !== undefined && remaining === undefined)
+	)
+		return undefined;
+	// Observed: used=limit=100 with remaining omitted. The cause is undocumented.
 	if (used === undefined && remaining !== undefined) {
 		used = Math.max(0, limit - remaining);
 	}
@@ -137,6 +143,7 @@ function asObject(value: unknown): Record<string, unknown> | undefined {
 
 function asFiniteNumber(value: unknown): number | undefined {
 	if (typeof value !== "number" && typeof value !== "string") return undefined;
+	if (typeof value === "string" && !value.trim()) return undefined;
 	const parsed = Number(value);
 	return Number.isFinite(parsed) ? parsed : undefined;
 }
