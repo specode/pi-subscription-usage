@@ -68,9 +68,7 @@ function kimiPlanName(root: Record<string, unknown>): string | undefined {
 	if (typeof membership?.level !== "string") return undefined;
 	const level = sanitizeDisplayText(membership.level, MAX_PLAN_LEVEL_LENGTH);
 	if (!level) return undefined;
-	return Object.hasOwn(KIMI_PLAN_NAMES, level)
-		? KIMI_PLAN_NAMES[level]
-		: level;
+	return Object.hasOwn(KIMI_PLAN_NAMES, level) ? KIMI_PLAN_NAMES[level] : level;
 }
 
 function parseQuota(
@@ -79,13 +77,19 @@ function parseQuota(
 	const record = asObject(value);
 	if (!record) return undefined;
 	const limit = asFiniteNumber(record.limit);
-	const used = asFiniteNumber(record.used);
-	const remaining = asFiniteNumber(record.remaining);
+	let used = asFiniteNumber(record.used);
+	let remaining = asFiniteNumber(record.remaining);
+	if (limit === undefined || limit <= 0) return undefined;
+	// Kimi omits remaining when used has rounded up to the limit.
+	if (used === undefined && remaining !== undefined) {
+		used = Math.max(0, limit - remaining);
+	}
+	if (remaining === undefined && used !== undefined) {
+		remaining = Math.max(0, limit - used);
+	}
 	if (
-		limit === undefined ||
 		used === undefined ||
 		remaining === undefined ||
-		limit <= 0 ||
 		used < 0 ||
 		remaining < 0
 	) {

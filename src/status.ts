@@ -1,5 +1,6 @@
 import {
 	DEFAULT_USAGE_DISPLAY_MODE,
+	formatUsagePercent,
 	usagePercent,
 	usagePercentRemaining,
 	usagePercentUsed,
@@ -97,8 +98,7 @@ export function formatUsageStatusline(
 	if (event.status !== "ready" || event.windows.length === 0) return undefined;
 	return event.windows
 		.map(
-			(window) =>
-				`${window.label} ${Math.round(window.displayPercent).toString()}%`,
+			(window) => `${window.label} ${formatUsagePercent(window.displayPercent)}%`,
 		)
 		.join(" · ");
 }

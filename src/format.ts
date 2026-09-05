@@ -1,6 +1,7 @@
 // Formatting model adapted from @narumitw/pi-usage@0.53.0 (MIT).
 import {
 	DEFAULT_USAGE_DISPLAY_MODE,
+	formatUsagePercent,
 	usageAmount,
 	usagePercent,
 	type UsageDisplayMode,
@@ -94,7 +95,7 @@ function formatBucket(
 	if (selectedPercent !== undefined) {
 		const filled = Math.round((selectedPercent / 100) * BAR_SEGMENTS);
 		const bar = `${"█".repeat(filled)}${"░".repeat(BAR_SEGMENTS - filled)}`;
-		const percent = `${String(Math.round(selectedPercent)).padStart(3)}%`;
+		const percent = `${formatUsagePercent(selectedPercent).padStart(3)}%`;
 		if (
 			bucket.unit !== "percent" &&
 			bucket.limit !== undefined &&

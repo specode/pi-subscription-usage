@@ -296,6 +296,71 @@ test("normalizes Kimi weekly and rolling quotas", () => {
 	);
 });
 
+test("keeps Kimi weekly quota when remaining is omitted", () => {
+	const report = normalizeKimiUsage(
+		{
+			usage: {
+				limit: "100",
+				used: "100",
+				resetTime: "2026-09-05T03:41:40.577856Z",
+			},
+			limits: [
+				{
+					window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+					detail: {
+						limit: "100",
+						used: "19",
+						remaining: "81",
+						resetTime: "2026-09-05T05:41:40.577856Z",
+					},
+				},
+			],
+		},
+		capturedAt,
+	);
+	assert.equal(report.buckets[0]?.id, "weekly");
+	assert.equal(report.buckets[0]?.used, 100);
+	assert.equal(report.buckets[0]?.remaining, 0);
+	assert.equal(report.buckets[1]?.used, 19);
+	assert.equal(
+		formatUsageStatusline(report, undefined, "used"),
+		"5h 19% · 1w 100%",
+	);
+});
+
+test("preserves Kimi fractional percentages instead of rounding them away", () => {
+	const report = normalizeKimiUsage(
+		{
+			usage: {
+				limit: "100",
+				used: "99.96",
+				resetTime: "2026-09-05T03:41:40.577856Z",
+			},
+			limits: [
+				{
+					window: { duration: 300, timeUnit: "TIME_UNIT_MINUTE" },
+					detail: {
+						limit: "100",
+						used: "18.86",
+						remaining: "81.14",
+						resetTime: "2026-09-05T05:41:40.577856Z",
+					},
+				},
+			],
+		},
+		capturedAt,
+	);
+	assert.equal(report.buckets[0]?.used, 99.96);
+	assert.equal(report.buckets[1]?.used, 18.86);
+	assert.equal(
+		formatUsageStatusline(report, undefined, "used"),
+		"5h 18.86% · 1w 99.96%",
+	);
+	assert.equal(formatUsageStatusline(report), "5h 81.14% · 1w 0.04%");
+	assert.match(formatUsageReport(report, "used"), /18\.86% used/u);
+	assert.match(formatUsageReport(report, "used"), /99\.96% used/u);
+});
+
 test("preserves unknown Kimi membership levels without prototype lookup", () => {
 	for (const level of ["LEVEL_FUTURE", "constructor", "__proto__"]) {
 		const report = normalizeKimiUsage(
@@ -393,10 +458,10 @@ test("maps unified Grok monthly quota onto the shared 1m window", () => {
 	assert.equal(report.buckets[1]?.id, "monthly");
 	assert.equal(report.buckets[1]?.period, "monthly");
 	assert.equal(Math.round(report.buckets[1]?.used ?? 0), 70);
-	assert.equal(formatUsageStatusline(report), "1w 100% · 1m 30%");
+	assert.equal(formatUsageStatusline(report), "1w 100% · 1m 29.68%");
 	assert.match(
 		formatUsageReport(report),
-		/1w Window +[█░]{12} +100% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n {2}1m Window +[█░]{12} +30% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
+		/1w Window +[█░]{12} +100% left · resets \d{2}\/\d{2} \d{2}:\d{2}\n {2}1m Window +[█░]{12} +29\.68% left · resets \d{2}\/\d{2} \d{2}:\d{2}/u,
 	);
 	assert.equal(
 		report.metrics.find((metric) => metric.id === "included-used")?.value,
@@ -625,7 +690,7 @@ test("Grok adapter probes monthly billing for unified accounts", async () => {
 			new AbortController().signal,
 			5_000,
 		);
-		assert.equal(formatUsageStatusline(report), "1w 100% · 1m 30%");
+		assert.equal(formatUsageStatusline(report), "1w 100% · 1m 29.68%");
 		assert.deepEqual(calls, [
 			"https://cli-chat-proxy.grok.com/v1/user",
 			"https://cli-chat-proxy.grok.com/v1/billing?format=credits",
