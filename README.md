@@ -85,7 +85,7 @@ Before redeeming a Codex reset credit, the extension:
 
 The extension publishes two status layers:
 
-- A plain `setStatus` string without provider names or icons, such as `5h 99% · 1w 85% · 1m 60%`.
+- A plain `setStatus` string without provider names or icons, such as `5h 99% ↻2h13m · 1w 85% ↻3d4h · 1m 60%`. `↻` marks the countdown to each window's reset, shown only when the provider reports a future reset time. The footer refreshes every 5 minutes and after each agent turn, so the countdown can lag by up to about 5 minutes.
 - Structured window data through the `subscription-usage/status/v1` event.
 
 Windows are always ordered as `5h / 1w / 1m / other`. Other extensions can consume the structured event to provide their own icons, colors, and layout without parsing display text. Ready events include `displayMode`; each window includes `displayPercent`, `remainingPercent`, and `usedPercent`. Consumers should render `displayPercent` while using the explicit remaining/used fields for semantic decisions such as colors or alerts.

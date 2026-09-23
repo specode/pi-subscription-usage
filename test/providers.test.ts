@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { formatUsageReport, formatUsageStatusline } from "../src/format.ts";
 import { SUPPORTED_ADAPTERS } from "../src/query.ts";
-import { buildUsageStatusEvent } from "../src/status.ts";
+import { buildUsageStatusEvent, formatResetCountdown } from "../src/status.ts";
 import {
 	codexEmailFromAuthorization,
 	normalizeCodexUsage,
@@ -72,10 +72,18 @@ test("normalizes Codex windows and earned resets", () => {
 		report.metrics.find((metric) => metric.id === "plan")?.value,
 		"Pro",
 	);
-	assert.equal(formatUsageStatusline(report), "5h 75% · 1w 50%");
+	const beforeReset = (1_800_000_000 - (2 * 60 + 13) * 60) * 1_000;
 	assert.equal(
-		formatUsageStatusline(report, undefined, "used"),
-		"5h 25% · 1w 50%",
+		formatUsageStatusline(report, undefined, "remaining", beforeReset),
+		"5h 75% ↻2h13m · 1w 50%",
+	);
+	assert.equal(
+		formatUsageStatusline(report, undefined, "used", beforeReset),
+		"5h 25% ↻2h13m · 1w 50%",
+	);
+	assert.equal(
+		formatUsageStatusline(report, undefined, "remaining", 1_800_000_000_000),
+		"5h 75% · 1w 50%",
 	);
 	const panel = formatUsageReport(report);
 	assert.match(
@@ -112,14 +120,19 @@ test("normalizes Codex windows and earned resets", () => {
 		"5h 10%",
 	);
 	assert.equal(
-		formatUsageStatusline({
-			...report,
-			defaultGroupId: undefined,
-			buckets: report.buckets.map((bucket) => ({
-				...bucket,
-				modelKeys: undefined,
-			})),
-		}),
+		formatUsageStatusline(
+			{
+				...report,
+				defaultGroupId: undefined,
+				buckets: report.buckets.map((bucket) => ({
+					...bucket,
+					modelKeys: undefined,
+				})),
+			},
+			undefined,
+			"remaining",
+			1_800_000_000_000,
+		),
 		"5h 75% · 5h 10% · 1w 50%",
 	);
 });
@@ -918,3 +931,16 @@ function jsonResponse(body: unknown, status = 200): Response {
 		headers: { "content-type": "application/json" },
 	});
 }
+
+test("formats reset countdowns with two compact units", () => {
+	const minute = 60_000;
+	assert.equal(formatResetCountdown(0), undefined);
+	assert.equal(formatResetCountdown(-minute), undefined);
+	assert.equal(formatResetCountdown(Number.NaN), undefined);
+	assert.equal(formatResetCountdown(30_000), "<1m");
+	assert.equal(formatResetCountdown(59 * minute + 59_000), "59m");
+	assert.equal(formatResetCountdown(120 * minute), "2h");
+	assert.equal(formatResetCountdown(133 * minute), "2h13m");
+	assert.equal(formatResetCountdown(3 * 1_440 * minute), "3d");
+	assert.equal(formatResetCountdown((3 * 1_440 + 4 * 60 + 59) * minute), "3d4h");
+});

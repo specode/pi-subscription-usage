@@ -93,14 +93,33 @@ export function formatUsageStatusline(
 	report: UsageReport,
 	model?: UsageModel,
 	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
+	nowMs: number = Date.now(),
 ): string | undefined {
 	const event = buildUsageStatusEvent(report, model, displayMode);
 	if (event.status !== "ready" || event.windows.length === 0) return undefined;
 	return event.windows
-		.map(
-			(window) => `${window.label} ${formatUsagePercent(window.displayPercent)}%`,
-		)
+		.map((window) => {
+			const countdown =
+				window.resetsAt === undefined
+					? undefined
+					: formatResetCountdown(window.resetsAt * 1_000 - nowMs);
+			const percent = `${window.label} ${formatUsagePercent(window.displayPercent)}%`;
+			return countdown ? `${percent} ↻${countdown}` : percent;
+		})
 		.join(" · ");
+}
+
+/** Compact two-unit countdown such as `3d4h`, `2h13m`, or `<1m`; past resets yield nothing. */
+export function formatResetCountdown(remainingMs: number): string | undefined {
+	if (!Number.isFinite(remainingMs) || remainingMs <= 0) return undefined;
+	const totalMinutes = Math.floor(remainingMs / 60_000);
+	if (totalMinutes < 1) return "<1m";
+	const days = Math.floor(totalMinutes / 1_440);
+	const hours = Math.floor((totalMinutes % 1_440) / 60);
+	const minutes = totalMinutes % 60;
+	if (days > 0) return hours > 0 ? `${days}d${hours}h` : `${days}d`;
+	if (hours > 0) return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;
+	return `${minutes}m`;
 }
 
 export function usageWindowLabel(bucket: UsageBucket): string {
