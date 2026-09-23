@@ -153,10 +153,16 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			}
 			return;
 		}
+		const nowMs = Date.now();
 		emitUsageStatus(
-			buildUsageStatusEvent(outcome.state.report, model, displayMode),
+			buildUsageStatusEvent(outcome.state.report, model, displayMode, nowMs),
 		);
-		const value = formatUsageStatusline(outcome.state.report, model, displayMode);
+		const value = formatUsageStatusline(
+			outcome.state.report,
+			model,
+			displayMode,
+			nowMs,
+		);
 		if (!safeSetStatus(ctx, value)) return;
 		if (schedule && sessionActive) scheduleStatusRefresh(ctx, model);
 	}

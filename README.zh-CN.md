@@ -88,7 +88,7 @@ Codex 结果会按以下额度域分组：
 - 不含提供商名称或图标的普通 `setStatus` 文本，例如 `5h 99% ↻2h13m · 1w 85% ↻3d4h · 1m 60%`。`↻` 后是距离该窗口重置的倒计时，仅在提供商返回未来的重置时间时显示。底部状态每 5 分钟及每轮 agent 结束后刷新，因此倒计时最多可能滞后约 5 分钟。
 - 通过 `subscription-usage/status/v1` 事件发布的结构化窗口数据。
 
-窗口始终按 `5h / 1w / 1m / other` 排序。其他扩展可以直接消费结构化事件，自定义图标、颜色和布局，而不必解析显示文本。就绪事件包含 `displayMode`，每个窗口包含 `displayPercent`、`remainingPercent` 和 `usedPercent`；消费者应展示 `displayPercent`，并在颜色或告警等语义判断中使用明确的剩余/已用字段。
+窗口始终按 `5h / 1w / 1m / other` 排序。其他扩展可以直接消费结构化事件，自定义图标、颜色和布局，而不必解析显示文本。就绪事件包含 `displayMode`，每个窗口包含 `displayPercent`、`remainingPercent` 和 `usedPercent`；消费者应展示 `displayPercent`，并在颜色或告警等语义判断中使用明确的剩余/已用字段。提供商返回未来的重置时间时，窗口还包含 `resetCountdown`（例如 `2h13m`），在发布事件时计算，格式和刷新频率与底部状态文本一致；消费者可直接展示，无需自行根据 `resetsAt` 格式化。
 
 ## 安全边界
 

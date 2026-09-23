@@ -27,6 +27,8 @@ export interface UsageStatusWindow {
 	displayPercent: number;
 	windowMinutes?: number;
 	resetsAt?: number;
+	/** Countdown to `resetsAt` at publish time, such as `2h13m`; absent once the reset has passed. */
+	resetCountdown?: string;
 }
 
 export type UsageStatusEvent =
@@ -51,6 +53,7 @@ export function buildUsageStatusEvent(
 	report: UsageReport,
 	model?: UsageModel,
 	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
+	nowMs: number = Date.now(),
 ): UsageStatusEvent {
 	const buckets = bucketsForModel(report, model);
 	const windows = sortUsageBuckets(buckets).flatMap((bucket) => {
@@ -64,6 +67,10 @@ export function buildUsageStatusEvent(
 		) {
 			return [];
 		}
+		const resetCountdown =
+			bucket.resetsAt === undefined
+				? undefined
+				: formatResetCountdown(bucket.resetsAt * 1_000 - nowMs);
 		return [
 			{
 				kind: usageWindowKind(bucket),
@@ -75,6 +82,7 @@ export function buildUsageStatusEvent(
 					? {}
 					: { windowMinutes: bucket.windowMinutes }),
 				...(bucket.resetsAt === undefined ? {} : { resetsAt: bucket.resetsAt }),
+				...(resetCountdown === undefined ? {} : { resetCountdown }),
 			} satisfies UsageStatusWindow,
 		];
 	});
@@ -95,16 +103,14 @@ export function formatUsageStatusline(
 	displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE,
 	nowMs: number = Date.now(),
 ): string | undefined {
-	const event = buildUsageStatusEvent(report, model, displayMode);
+	const event = buildUsageStatusEvent(report, model, displayMode, nowMs);
 	if (event.status !== "ready" || event.windows.length === 0) return undefined;
 	return event.windows
 		.map((window) => {
-			const countdown =
-				window.resetsAt === undefined
-					? undefined
-					: formatResetCountdown(window.resetsAt * 1_000 - nowMs);
 			const percent = `${window.label} ${formatUsagePercent(window.displayPercent)}%`;
-			return countdown ? `${percent} ↻${countdown}` : percent;
+			return window.resetCountdown
+				? `${percent} ↻${window.resetCountdown}`
+				: percent;
 		})
 		.join(" · ");
 }

@@ -85,6 +85,25 @@ test("normalizes Codex windows and earned resets", () => {
 		formatUsageStatusline(report, undefined, "remaining", 1_800_000_000_000),
 		"5h 75% · 1w 50%",
 	);
+	const event = buildUsageStatusEvent(report, undefined, "remaining", beforeReset);
+	assert.equal(event.status, "ready");
+	if (event.status === "ready") {
+		assert.deepEqual(
+			event.windows.map((window) => window.resetCountdown),
+			["2h13m", undefined],
+		);
+	}
+	const afterReset = buildUsageStatusEvent(
+		report,
+		undefined,
+		"remaining",
+		1_800_000_000_000,
+	);
+	assert.equal(afterReset.status, "ready");
+	if (afterReset.status === "ready") {
+		assert.equal(afterReset.windows[0]?.resetsAt, 1_800_000_000);
+		assert.equal(afterReset.windows[0]?.resetCountdown, undefined);
+	}
 	const panel = formatUsageReport(report);
 	assert.match(
 		panel,
