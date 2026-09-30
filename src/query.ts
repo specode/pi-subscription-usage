@@ -9,6 +9,7 @@ import {
 	redactUsageError,
 } from "./core.ts";
 import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
+import { normalizeCodexResetCreditsPayload } from "./codex-reset-core.ts";
 import {
 	codexEmailFromAuthorization,
 	normalizeCodexUsage,
@@ -23,7 +24,7 @@ import {
 import { normalizeKimiUsage } from "./providers/kimi.ts";
 import {
 	OPENAI_PROVIDER_ID,
-	normalizeOpenAIUsage,
+	normalizeOpenAIPlanUsage,
 	openaiClientIdFromAuthorization,
 } from "./providers/openai.ts";
 import { normalizeOpenCodeGoUsage } from "./providers/opencode-go.ts";
@@ -59,20 +60,25 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 		providerIds: [OPENAI_PROVIDER_ID],
 		officialOrigins: ["https://api.openai.com"],
 		requiresOAuth: true,
-		semantics: { kind: "consumer-subscription", label: "ChatGPT app subscription limits" },
+		semantics: { kind: "consumer-subscription", label: "ChatGPT plan and app limits" },
 		async query(auth, signal, timeoutMs) {
 			if (!auth.openaiClientId) throw new Error("OpenAI application identity is unavailable.");
-			return normalizeOpenAIUsage(
-				await fetchProviderJson(
-					`${CODEX_USAGE_URL}/chatpass/apps`,
-					auth,
-					signal,
-					timeoutMs,
-					"OpenAI app usage endpoint",
-				),
-				auth.openaiClientId,
-				Date.now(),
-			);
+			const [appPayload, planPayload] = await Promise.all([
+				fetchProviderJson(`${CODEX_USAGE_URL}/chatpass/apps`, auth, signal, timeoutMs, "OpenAI app usage endpoint"),
+				fetchProviderJson(CODEX_USAGE_URL, auth, signal, timeoutMs, "OpenAI plan usage endpoint"),
+			]);
+			const report = normalizeOpenAIPlanUsage(appPayload, planPayload, auth.openaiClientId, Date.now());
+			try {
+				const credits = normalizeCodexResetCreditsPayload(await fetchProviderJson(
+					"https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+					auth, signal, timeoutMs, "Account reset credits endpoint",
+				), { requireExplicitCredit: true });
+				report.metrics.push({ id: "reset-credits", label: "Account Resets", value: credits.availableCount, unit: "count" });
+			} catch (error) {
+				if (isAbortError(error) || signal.aborted) throw error;
+				report.notes = ["Account reset availability could not be verified."];
+			}
+			return report;
 		},
 	},
 	{

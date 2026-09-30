@@ -208,7 +208,9 @@ function bucketsForModel(
 	if (!hasGroups || (!report.defaultGroupId && !hasModelGroups)) {
 		return report.buckets;
 	}
-	const group = selectUsageGroup(report, model);
+	const group = !hasModelGroups && report.defaultGroupId
+		? report.defaultGroupId
+		: selectUsageGroup(report, model);
 	return report.buckets.filter(
 		(bucket) => (bucket.groupId ?? bucket.id) === group,
 	);

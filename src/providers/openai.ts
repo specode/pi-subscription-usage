@@ -1,5 +1,6 @@
 import { sanitizeDisplayText } from "../core.ts";
 import type { UsageBucket, UsageReport } from "../types.ts";
+import { normalizeCodexUsage } from "./codex.ts";
 
 export const OPENAI_PROVIDER_ID = "openai";
 
@@ -83,6 +84,52 @@ export function normalizeOpenAIUsage(
 			...(allowance !== undefined && allowance >= 0 && allowance <= 100
 				? [{ id: "allowance", label: "Plan Allowance", value: `${allowance}%` }]
 				: []),
+		],
+	};
+}
+
+/** The website's Plan limits and app-specific caps are separate quota domains. */
+export function normalizeOpenAIPlanUsage(
+	appPayload: unknown,
+	planPayload: unknown,
+	clientId: string,
+	capturedAt: number,
+): UsageReport {
+	// Require the exact app match even when account-wide plan data is available.
+	const app = normalizeOpenAIUsage(appPayload, clientId, capturedAt);
+	const root = asObject(planPayload);
+	const plan = normalizeCodexUsage({
+		rate_limit: root?.rate_limit,
+		credits: root?.credits,
+	}, capturedAt);
+	if (plan.buckets.length === 0) {
+		throw new Error("OpenAI subscription returned no displayable plan usage windows.");
+	}
+	const name = app.metrics.find((metric) => metric.id === "app")?.value ?? "Current";
+	return {
+		...app,
+		source: "openai-plan-and-app-pi-auth",
+		semantics: { kind: "consumer-subscription", label: "ChatGPT plan and app limits" },
+		defaultGroupId: "chatgpt-plan",
+		buckets: [
+			...plan.buckets.map((bucket) => ({
+				...bucket,
+				id: `plan:${bucket.id}`,
+				groupId: "chatgpt-plan",
+				groupLabel: "Plan limits",
+				modelKeys: undefined,
+			})),
+			...app.buckets.map((bucket) => ({
+				...bucket,
+				groupId: "chatgpt-app",
+				groupLabel: `${name} app limits`,
+			})),
+		],
+		metrics: [
+			...app.metrics.map((metric) => metric.id === "allowance"
+				? { ...metric, label: "App Allowance" } : metric),
+			...plan.metrics.filter((metric) => metric.id === "credits")
+				.map((metric) => ({ ...metric, label: "Credits Balance" })),
 		],
 	};
 }

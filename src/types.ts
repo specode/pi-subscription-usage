@@ -51,6 +51,8 @@ export interface ResolvedUsageAuth {
 	actualProviderId: string;
 	/** Active OpenAI OAuth registration, matched against the ChatGPT app list. */
 	openaiClientId?: string;
+	/** Original usage identity, retained when reset auth adds account headers. */
+	usageFingerprint?: string;
 	apiKey?: string;
 	headers: Record<string, string>;
 	fingerprint: string;

@@ -32,6 +32,7 @@ import {
 } from "./codex-resets.ts";
 import { formatProviderState } from "./format.ts";
 import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
+import { OPENAI_PROVIDER_ID } from "./providers/openai.ts";
 import {
 	buildUsageStatusEvent,
 	formatUsageStatusline,
@@ -405,15 +406,19 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		controller: AbortController,
 	): Promise<StableCurrent | undefined> {
 		if (
-			ctx.model?.provider !== CODEX_PROVIDER_ID ||
+			![CODEX_PROVIDER_ID, OPENAI_PROVIDER_ID].includes(ctx.model?.provider ?? "") ||
 			current.outcome.state.status !== "ready"
 		) {
 			ctx.ui.notify(
-				"Codex resets only work with the current Codex OAuth account.",
+				"Account resets require the current OpenAI or Codex OAuth account.",
 				"warning",
 			);
 			return undefined;
 		}
+		const expectedModel = modelIdentity(current.model);
+		const isOpenAI = current.model?.provider === OPENAI_PROVIDER_ID;
+		const resetLabel = isOpenAI ? "Account" : "Codex";
+		if (modelIdentity(ctx.model) !== expectedModel) throw new Error("Model changed; reset cancelled.");
 		const summaryCount = codexResetCount(current.outcome.state.report) ?? 0;
 		let auth = await awaitWithDeadline(
 			() => resolveCodexResetAuth(ctx),
@@ -421,6 +426,9 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			QUERY_TIMEOUT_MS,
 			"resolving Codex reset authentication",
 		);
+		if (auth.usageFingerprint !== current.outcome.fingerprint) {
+			throw new Error("Account changed since usage was displayed; run /usage again.");
+		}
 		let availability;
 		try {
 			availability = await listCodexResetCredits(
@@ -429,7 +437,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				QUERY_TIMEOUT_MS,
 			);
 		} catch (error) {
-			if (summaryCount <= 0) throw error;
+			if (isOpenAI || isAbortError(error) || summaryCount <= 0) throw error;
 			availability = {
 				availableCount: summaryCount,
 				options: [genericCodexResetOption()],
@@ -443,52 +451,59 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			(option: CodexResetOption, index: number) =>
 				`${index + 1}. ${option.title} · ${resetOptionExpiration(option)}`,
 		);
-		const selected = await ctx.ui.select("Choose a Codex Reset", labels);
+		const selected = await ctx.ui.select(`Choose a ${resetLabel} Reset`, labels);
 		if (!selected) return undefined;
 		const option = availability.options[labels.indexOf(selected)];
 		if (!option) return undefined;
 		const confirmation = await ctx.ui.select(
-			`Redeem one Codex reset?\n${option.title}\n${option.description}\n${resetOptionExpiration(option)}`,
+			`Redeem one ${resetLabel} reset?\n${option.title}\n${option.description}\n${resetOptionExpiration(option)}${isOpenAI ? "\nConsumes a reset from the companion Codex account. Only ticket-supported account windows are reset; clearing this app's quota is not guaranteed." : ""}`,
 			[...CODEX_RESET_CONFIRMATION_OPTIONS],
 		);
 		if (!isCodexResetConfirmed(confirmation)) return undefined;
 
-		const expectedModel = modelIdentity(ctx.model);
 		const expectedFingerprint = auth.fingerprint;
 		const requestId = randomUUID();
+		let submitted = false;
 		while (!controller.signal.aborted) {
-			auth = await awaitWithDeadline(
-				() => resolveCodexResetAuth(ctx),
-				controller.signal,
-				QUERY_TIMEOUT_MS,
-				"revalidating Codex reset authentication",
-			);
-			if (
-				modelIdentity(ctx.model) !== expectedModel ||
-				auth.fingerprint !== expectedFingerprint
-			) {
-				throw new Error("Codex model or account changed; reset not redeemed.");
-			}
 			try {
-				const outcome = await consumeCodexResetCredit(
+				auth = await awaitWithDeadline(
+					() => resolveCodexResetAuth(ctx),
+					controller.signal,
+					QUERY_TIMEOUT_MS,
+					"revalidating Codex reset authentication",
+				);
+				if (
+					modelIdentity(ctx.model) !== expectedModel ||
+					auth.fingerprint !== expectedFingerprint
+				) {
+					throw new Error("Model or account changed; reset not submitted.");
+				}
+				if (isOpenAI) {
+					await queryProviderUsage(adapterForProvider(OPENAI_PROVIDER_ID)!, auth, controller.signal, QUERY_TIMEOUT_MS);
+					const checked = await awaitWithDeadline(() => resolveCodexResetAuth(ctx), controller.signal, QUERY_TIMEOUT_MS, "revalidating account reset authentication");
+					if (checked.fingerprint !== expectedFingerprint || modelIdentity(ctx.model) !== expectedModel) {
+						throw new Error("OpenAI or Codex account changed; reset not submitted.");
+					}
+					auth = checked;
+				}
+			} catch (error) {
+				if (isAbortError(error) || !sessionActive) throw error;
+				if (!submitted) throw error;
+				// A previous POST may have succeeded even though its response was lost.
+				ctx.ui.notify("Reset result uncertain; retry stopped during account or usage verification. Run /usage to check your quota and reset credits.", "warning");
+				return undefined;
+			}
+
+			let outcome;
+			try {
+				submitted = true;
+				outcome = await consumeCodexResetCredit(
 					auth,
 					option,
 					requestId,
 					controller.signal,
 					QUERY_TIMEOUT_MS,
 				);
-				cache.clearProvider(CODEX_PROVIDER_ID);
-				failureBackoff.clear();
-				const refreshed = await queryStableCurrent(ctx, true, controller.signal);
-				if (refreshed?.model) {
-					publishStatus(ctx, refreshed.outcome, refreshed.model, sessionActive);
-				}
-				const remaining =
-					refreshed?.outcome.state.status === "ready"
-						? codexResetCount(refreshed.outcome.state.report)
-						: undefined;
-				ctx.ui.notify(formatCodexResetOutcome(outcome, remaining), "info");
-				return refreshed;
 			} catch (error) {
 				if (isAbortError(error) || !sessionActive) throw error;
 				const retryAction = "Retry with Same Request ID";
@@ -497,9 +512,30 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 					"Cancel",
 				]);
 				if (retry !== retryAction) {
-					ctx.ui.notify(`Reset not confirmed: ${errorMessage(error)}`, "warning");
+					ctx.ui.notify(`Reset result uncertain; run /usage to check your quota and reset credits. ${errorMessage(error)}`, "warning");
 					return undefined;
 				}
+				continue;
+			}
+
+			// A confirmed consume result must never become another consume retry.
+			cache.clearProvider(CODEX_PROVIDER_ID);
+			cache.clearProvider(OPENAI_PROVIDER_ID);
+			failureBackoff.clear();
+			ctx.ui.notify(formatCodexResetOutcome(outcome, undefined), "info");
+			try {
+				const refreshed = await queryStableCurrent(ctx, true, controller.signal);
+				if (!refreshed || refreshed.outcome.state.status !== "ready") {
+					ctx.ui.notify("Reset result confirmed, but usage refresh failed. Run /usage again.", "warning");
+				}
+				if (refreshed?.model) {
+					publishStatus(ctx, refreshed.outcome, refreshed.model, sessionActive);
+				}
+				return refreshed;
+			} catch (error) {
+				if (isAbortError(error) || !sessionActive) throw error;
+				ctx.ui.notify("Reset result confirmed, but usage refresh or display failed. Run /usage again.", "warning");
+				return undefined;
 			}
 		}
 		return undefined;
@@ -526,7 +562,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				publishStatus(ctx, current.outcome, current.model, sessionActive);
 			}
 			if (
-				ctx.model?.provider !== CODEX_PROVIDER_ID ||
+				![CODEX_PROVIDER_ID, OPENAI_PROVIDER_ID].includes(ctx.model?.provider ?? "") ||
 				current.outcome.state.status !== "ready"
 			) {
 				return;

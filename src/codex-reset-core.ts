@@ -107,6 +107,7 @@ export function verifyCodexStoredOAuthCredential(
 
 export function normalizeCodexResetCreditsPayload(
 	payload: Record<string, unknown>,
+	options: { requireExplicitCredit?: boolean; now?: number } = {},
 ): CodexResetAvailability {
 	const availableCount = nonnegativeInteger(payload.available_count);
 	if (availableCount === undefined) {
@@ -117,7 +118,7 @@ export function normalizeCodexResetCreditsPayload(
 	if (payload.credits !== undefined && !Array.isArray(payload.credits)) {
 		throw new Error("Codex reset credits response returned invalid credits.");
 	}
-	const options: CodexResetOption[] = [];
+	const resetOptions: CodexResetOption[] = [];
 	for (const rawCredit of payload.credits ?? []) {
 		const credit = asObject(rawCredit);
 		if (
@@ -127,17 +128,24 @@ export function normalizeCodexResetCreditsPayload(
 		) {
 			continue;
 		}
-		options.push(normalizeResetOption(credit));
+		if (options.requireExplicitCredit && credit.is_supported_by_plan !== true) continue;
+		const option = normalizeResetOption(credit);
+		if (options.requireExplicitCredit && option.expiresAt !== undefined &&
+			option.expiresAt * 1_000 <= (options.now ?? Date.now())) continue;
+		resetOptions.push(option);
 	}
-	options.sort(
+	resetOptions.sort(
 		(left, right) =>
 			(left.expiresAt ?? Number.MAX_SAFE_INTEGER) -
 			(right.expiresAt ?? Number.MAX_SAFE_INTEGER),
 	);
-	options.splice(Math.min(availableCount, 32));
-	if (availableCount > 0 && options.length === 0)
-		options.push(genericCodexResetOption());
-	return { availableCount, options };
+	resetOptions.splice(Math.min(availableCount, 32));
+	if (!options.requireExplicitCredit && availableCount > 0 && resetOptions.length === 0)
+		resetOptions.push(genericCodexResetOption());
+	return {
+		availableCount: options.requireExplicitCredit ? resetOptions.length : availableCount,
+		options: resetOptions,
+	};
 }
 
 export function parseCodexResetOutcome(

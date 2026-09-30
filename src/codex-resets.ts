@@ -20,6 +20,7 @@ import {
 } from "./query.ts";
 import type { ResolvedUsageAuth } from "./types.ts";
 import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
+import { OPENAI_PROVIDER_ID } from "./providers/openai.ts";
 
 const RESET_CREDITS_URL =
 	"https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
@@ -33,13 +34,13 @@ export async function resolveCodexResetAuth(
 	credentialReader: StoredCredentialReader = readStoredCredential,
 ): Promise<ResolvedUsageAuth> {
 	const model = ctx.model;
-	if (model?.provider !== CODEX_PROVIDER_ID) {
+	if (model?.provider !== CODEX_PROVIDER_ID && model?.provider !== OPENAI_PROVIDER_ID) {
 		throw new Error(
-			"Codex resets require the current model to use OpenAI Codex.",
+			"Account resets require the current model to use OpenAI or OpenAI Codex.",
 		);
 	}
 	const expectedModel = `${model.provider}/${model.id}`;
-	const adapter = adapterForProvider(CODEX_PROVIDER_ID);
+	const adapter = adapterForProvider(model.provider);
 	if (!adapter) throw new Error("OpenAI Codex usage support is unavailable.");
 	const auth = await resolveUsageAuth(ctx, adapter, salt);
 	if (`${ctx.model?.provider}/${ctx.model?.id}` !== expectedModel) {
@@ -58,16 +59,25 @@ export async function resolveCodexResetAuth(
 		resolvedAccess,
 		credentialReader(CODEX_PROVIDER_ID),
 	);
+	if (model.provider === OPENAI_PROVIDER_ID) {
+		const stored = credentialReader(OPENAI_PROVIDER_ID) as { type?: string; access?: string; refresh?: string } | undefined;
+		if (!stored || stored.type !== "oauth" || typeof stored.access !== "string" ||
+			typeof stored.refresh !== "string" || !stored.refresh || fingerprintResolvedAuth({ apiKey: `Bearer ${stored.access}`, headers: auth.headers }, salt) !== auth.fingerprint) {
+			throw new Error("The active OpenAI runtime account does not match Pi\'s stored OAuth account.");
+		}
+	}
 	const authorization = `Bearer ${resolvedAccess}`;
 	const headers = {
 		Authorization: authorization,
 		"chatgpt-account-id": accountId,
 	};
 	return {
-		actualProviderId: CODEX_PROVIDER_ID,
+		actualProviderId: model.provider,
+		openaiClientId: auth.openaiClientId,
+		usageFingerprint: auth.fingerprint,
 		apiKey: resolvedAccess,
 		headers,
-		fingerprint: fingerprintResolvedAuth({ headers }, salt),
+		fingerprint: fingerprintResolvedAuth({ apiKey: auth.fingerprint, headers }, salt),
 		secrets: [
 			...new Set([...auth.secrets, resolvedAccess, authorization, accountId]),
 		],
@@ -88,6 +98,7 @@ export async function listCodexResetCredits(
 			timeoutMs,
 			"Codex reset endpoint",
 		),
+		{ requireExplicitCredit: auth.actualProviderId === OPENAI_PROVIDER_ID },
 	);
 }
 
@@ -100,6 +111,9 @@ export async function consumeCodexResetCredit(
 ): Promise<CodexResetOutcome> {
 	if (!redeemRequestId)
 		throw new Error("Codex reset request ID must not be empty.");
+	if (auth.actualProviderId === OPENAI_PROVIDER_ID && !option.creditId) {
+		throw new Error("OpenAI account resets require an explicitly selected credit.");
+	}
 	return parseCodexResetOutcome(
 		await fetchProviderJson(
 			RESET_CONSUME_URL,

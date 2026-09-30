@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { normalizeOpenAIUsage, openaiClientIdFromAuthorization } from "../src/providers/openai.ts";
+import { normalizeOpenAIUsage, normalizeOpenAIPlanUsage, openaiClientIdFromAuthorization } from "../src/providers/openai.ts";
 import { adapterForProvider, queryProviderUsage, resolveUsageAuth, UsageUnsupportedError } from "../src/query.ts";
 import { formatUsageReport } from "../src/format.ts";
 import { buildUsageStatusEvent, formatUsageStatusline } from "../src/status.ts";
@@ -16,6 +16,13 @@ const payload = {
 	items: [{ id: clientId, name: "Pi", allowed_usage_percent: 100, windows: [
 		{ used_percent: 1, remaining_percent: 99, limit_window_seconds: 604800, reset_at: 2_000_000_000 },
 	] }],
+};
+const planPayload = {
+	rate_limit: { primary_window: { used_percent: 18, limit_window_seconds: 604800, reset_at: 1_999_920_000 } },
+	credits: { has_credits: true, unlimited: false, balance: "62500" },
+	// Neither additional model limits nor the separate aggregate app window is Plan limits.
+	chatpass: { windows: [{ used_percent: 3, limit_window_seconds: 604800 }] },
+	additional_rate_limits: [{ metered_feature: "gpt-6.1-sol", rate_limit: { primary_window: { used_percent: 70, limit_window_seconds: 604800 } } }],
 };
 const adapter = adapterForProvider("openai")!;
 const model = { provider: "openai", id: "gpt-6.1-sol", baseUrl: "https://api.openai.com/v1" };
@@ -92,14 +99,18 @@ test("OpenAI resolves two runtime credentials and sends only backend auth", asyn
 	assert.equal(auth.apiKey, undefined);
 	const original = globalThis.fetch;
 	globalThis.fetch = async (url, init) => {
-		assert.equal(url, "https://chatgpt.com/backend-api/wham/usage/chatpass/apps");
 		assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer backend-secret");
 		assert.equal(JSON.stringify(init).includes(token()), false);
+		if (url === "https://chatgpt.com/backend-api/wham/usage") return new Response(JSON.stringify(planPayload));
+		if (url === "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits") return new Response(JSON.stringify({ available_count: 0, credits: [] }));
+		assert.equal(url, "https://chatgpt.com/backend-api/wham/usage/chatpass/apps");
 		return new Response(JSON.stringify(payload));
 	};
 	try {
 		const report = await queryProviderUsage(adapter, auth, new AbortController().signal, 1000);
-		assert.equal(report.buckets[0].remaining, 99);
+		assert.equal(report.buckets[0].remaining, 82);
+		assert.equal(report.buckets[1].remaining, 99);
+		assert.equal(report.metrics.find(m => m.id === "reset-credits")?.value, 0);
 	} finally { globalThis.fetch = original; }
 });
 
@@ -127,6 +138,34 @@ test("missing or invalid Codex companion remains an authentication failure", asy
 		assert.equal(error instanceof UsageUnsupportedError, false);
 		return true;
 	});
+});
+
+test("OpenAI plan and app windows stay separate; footer and event use website plan limits", () => {
+	const appPayload = { items: [{ ...payload.items[0], windows: [{ ...payload.items[0].windows[0], used_percent: 3, remaining_percent: 97 }] }] };
+	const report = normalizeOpenAIPlanUsage(appPayload, planPayload, clientId, 123);
+	assert.equal(report.buckets.length, 2);
+	assert.equal(report.buckets[0].remaining, 82);
+	assert.equal(report.buckets[1].remaining, 97);
+	assert.equal(report.buckets[0].resetsAt, 1_999_920_000);
+	assert.equal(report.buckets[1].resetsAt, 2_000_000_000);
+	assert.equal(report.metrics.find(m => m.id === "credits")?.value, 62500);
+	assert.equal(report.metrics.find(m => m.id === "allowance")?.label, "App Allowance");
+	const panel = formatUsageReport(report);
+	assert.match(panel, /Plan limits:[\s\S]*82% left[\s\S]*Pi app limits:[\s\S]*97% left/u);
+	assert.match(panel, /Credits Balance\s+62500/u);
+	const event = buildUsageStatusEvent(report, { ...model, name: "Pi app limits", id: "chatgpt-app" });
+	assert.equal(event.status, "ready");
+	if (event.status === "ready") {
+		assert.equal(event.windows.length, 1);
+		assert.equal(event.windows[0].remainingPercent, 82);
+	}
+	assert.equal(formatUsageStatusline(report, model, "remaining", 1_999_920_000_000 - 518400000), "1w 82% ↻6d");
+	assert.equal(formatUsageStatusline(report, model, "used", 1_999_920_000_000 - 518400000), "1w 18% ↻6d");
+});
+
+test("missing plan windows or app match never fall back to a different quota domain", () => {
+	assert.throws(() => normalizeOpenAIPlanUsage(payload, { credits: planPayload.credits }, clientId, 1), /plan usage windows/);
+	assert.throws(() => normalizeOpenAIPlanUsage({ items: [] }, planPayload, clientId, 1), /not uniquely found/);
 });
 
 test("OpenAI errors redact both tokens and the registration ID", async () => {

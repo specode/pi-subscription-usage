@@ -6,7 +6,7 @@ A Pi extension that shows the active account's subscription quota in one consist
 
 Supported providers:
 
-- **OpenAI (ChatGPT subscription)** — app-specific subscription windows for Pi's `openai` OAuth login, rendered with the same quota bars and footer. Also requires `openai-codex` OAuth in Pi for the same ChatGPT account/workspace: its backend credential reads `/wham/usage/chatpass/apps`, and the active OpenAI token's application ID must match exactly one returned registration. Only that application's windows are shown, never Codex's quota. Both credentials participate in cache invalidation. No browser cookies are used, and no reset action is offered for this provider.
+- **OpenAI (ChatGPT subscription)** — separate `Plan limits` and app-limit groups for Pi's `openai` OAuth login, rendered with the existing quota bars. The footer and status event use `Plan limits`, matching the ChatGPT usage page. Also requires `openai-codex` OAuth in Pi for the same ChatGPT account/workspace: its backend credential reads `/wham/usage` for website plan windows (`rate_limit`) and credits, and `/wham/usage/chatpass/apps` for the exact active application registration. Plan and app windows have distinct percentages and reset times; neither substitutes for the other. `App Allowance` is the configured usage cap, not remaining quota. Both credentials participate in cache invalidation. No browser cookies are used. Available account reset tickets are shown as `Account Resets`; redemption uses the companion Codex account's reset endpoint with explicit confirmation, not an app-specific reset endpoint.
 
 - **OpenAI Codex** — 5-hour and weekly quota, model-specific quota, and confirmed reset-credit redemption.
 - **OpenCode Go** — 5-hour, weekly, and monthly windows.
@@ -55,7 +55,7 @@ Codex results are grouped by quota domain in this order:
 
 Windows from different domains are never interleaved. When available, the Codex `Account` section displays the email decoded locally from the active OAuth token. Run `/usage` again whenever you want to refresh; the command does not show refresh, provider-switching, or all-provider menus.
 
-The reset menu appears only when Codex reports redeemable reset credits. Grok's current API exposes quota windows and natural reset times, but no verified manual-reset endpoint or reset-credit count, so the extension never invents a reset action. Grok windows still render through the same `/usage` bars and status event as Codex, OpenCode Go, and Kimi.
+The reset menu appears for OpenAI and Codex only when redeemable reset credits are verified. Grok's current API exposes quota windows and natural reset times, but no verified manual-reset endpoint or reset-credit count, so the extension never invents a reset action. Grok windows still render through the same `/usage` bars and status event as Codex, OpenCode Go, and Kimi.
 
 ## Configuration
 
@@ -74,12 +74,14 @@ Create `~/.pi/agent/subscription-usage.json` for a global setting, or `.pi/subsc
 
 The setting applies to the footer status, `/usage` quota bars, and the structured status event. Run `/reload` after editing the file.
 
-## Codex reset safety
+## OpenAI / Codex reset safety
 
-Before redeeming a Codex reset credit, the extension:
+OpenAI mode uses the same `/wham/rate-limit-reset-credits` and `/consume` endpoints as the ChatGPT usage page. Only explicit, available, plan-supported, unexpired `codex_rate_limits` tickets are offered; failed listing never falls back to automatic redemption. Tickets reset server-defined account windows, **not necessarily the current app's window**. The confirmation states this scope. Reset availability failure does not hide plan/app quota; successful redemption invalidates both providers' usage caches.
 
-1. Verifies that the active model is still using Codex.
-2. Verifies that the runtime token exactly matches the OAuth account stored by Pi through `/login`.
+Before redeeming a reset credit, the extension:
+
+1. Verifies that the active OpenAI or Codex model and usage account have not changed.
+2. Verifies that the runtime token exactly matches the OAuth account stored by Pi through `/login`. OpenAI mode checks both stored credentials and rechecks application matching before redemption.
 3. Shows the reset that will be consumed and asks for explicit confirmation. `Cancel (Default)` is always the first option; only deliberately choosing the second option continues.
 4. Uses a unique request ID and reuses it across retries.
 
@@ -95,12 +97,12 @@ Windows are always ordered as `5h / 1w / 1m / other`. Other extensions can consu
 ## Security boundaries
 
 - Usage queries resolve credentials only through `ctx.modelRegistry.getProviderAuth()`.
-- Codex reset additionally reads Pi's stored OAuth credential through the public `readStoredCredential()` API, solely to verify that it exactly matches the active runtime account before redemption.
+- Account reset additionally reads Pi's stored OAuth credentials through the public `readStoredCredential()` API, solely to verify that it exactly matches the active runtime account before redemption.
 - Grok never reads `~/.grok/auth.json` and never accepts an API key in place of subscription OAuth.
 - Credentials are never written to caches, sessions, the status line, or error messages. Cache keys contain only in-process HMAC fingerprints.
 - The Codex email is decoded locally for the `/usage` account panel and is not included in the footer or structured status event.
 - Credentials are sent only to the corresponding official domains. Custom proxies and custom base URLs are rejected.
-- Codex reset is the only write operation. It is shown only when redeemable credits exist and always requires explicit confirmation.
+- Account reset redemption (OpenAI / Codex) is the only write operation. It is shown only when redeemable credits exist and always requires explicit confirmation.
 
 ## Development
 
@@ -129,7 +131,7 @@ pi --no-extensions --offline -e ./index.ts --list-models
 
 ## Stability
 
-OpenAI app usage also depends on an undocumented ChatGPT endpoint. If the companion Codex login is missing, sign in to **OpenAI Codex** through `/login` without changing the active OpenAI model. An account/workspace mismatch, missing registration, or missing windows produces an error rather than displaying another account's quota. `Plan Allowance` is the configured share the app may use, not its remaining percentage. `Source` identifies this as the matching app in Pi's Codex account; matching application IDs is not independent cryptographic verification of both token identities.
+OpenAI app usage also depends on an undocumented ChatGPT endpoint. If the companion Codex login is missing, sign in to **OpenAI Codex** through `/login` without changing the active OpenAI model. An account/workspace mismatch, missing registration, or missing windows produces an error rather than displaying another account's quota. `App Allowance` is the configured share the app may use, not its remaining percentage. `Source` identifies this as the matching app in Pi's Codex account; matching application IDs is not independent cryptographic verification of both token identities.
 
 Codex reset, Grok billing, and Kimi usage rely on undocumented provider APIs that may change. When an API fails, the extension reports the query error and does not fall back to uncontrolled credential or proxy paths.
 
