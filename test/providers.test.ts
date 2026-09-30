@@ -928,6 +928,100 @@ test("Grok adapter skips monthly billing for legacy weekly credits", async () =>
 	}
 });
 
+test("Codex adapter counts only redeemable reset tickets", async () => {
+	const original = globalThis.fetch;
+	const ticket = { status: "available", reset_type: "codex_rate_limits", is_supported_by_plan: true };
+	const access = codexToken("account-fixture");
+	globalThis.fetch = async (input, init) => {
+		if (String(input).endsWith("/wham/usage")) {
+			return jsonResponse({
+				rate_limit: { primary_window: { used_percent: 10, limit_window_seconds: 18_000 } },
+				rate_limit_reset_credits: { available_count: 3 },
+			});
+		}
+		const headers = init?.headers as Record<string, string>;
+		assert.equal(headers.Authorization, `Bearer ${access}`);
+		assert.equal(headers["chatgpt-account-id"], "account-fixture");
+		return jsonResponse({
+			available_count: 3,
+			credits: [
+				{ ...ticket, id: "valid" },
+				{ ...ticket, id: "expired", expires_at: "2020-01-01T00:00:00Z" },
+				{ ...ticket, id: "unsupported", is_supported_by_plan: false },
+			],
+		});
+	};
+	try {
+		const report = await requiredAdapter("openai-codex").query(
+			codexAuth(access),
+			new AbortController().signal,
+			5_000,
+		);
+		assert.equal(
+			report.metrics.find((metric) => metric.id === "reset-credits")?.value,
+			1,
+		);
+		assert.equal(report.notes, undefined);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("Codex adapter hides unverified resets but keeps usage", async () => {
+	const original = globalThis.fetch;
+	globalThis.fetch = async (input) => {
+		if (String(input).endsWith("/wham/usage")) {
+			return jsonResponse({
+				rate_limit: { primary_window: { used_percent: 10, limit_window_seconds: 18_000 } },
+				rate_limit_reset_credits: { available_count: 2 },
+			});
+		}
+		return jsonResponse({ error: "unavailable" }, 503);
+	};
+	try {
+		const report = await requiredAdapter("openai-codex").query(
+			codexAuth(),
+			new AbortController().signal,
+			5_000,
+		);
+		assert.equal(report.buckets.length, 1);
+		assert.equal(
+			report.metrics.find((metric) => metric.id === "reset-credits"),
+			undefined,
+		);
+		assert.deepEqual(report.notes, ["Reset availability could not be verified."]);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
+test("Codex adapter skips reset listing without a token account ID", async () => {
+	const original = globalThis.fetch;
+	const calls: string[] = [];
+	globalThis.fetch = async (input) => {
+		calls.push(String(input));
+		return jsonResponse({
+			rate_limit: { primary_window: { used_percent: 10, limit_window_seconds: 18_000 } },
+			rate_limit_reset_credits: { available_count: 2 },
+		});
+	};
+	try {
+		const report = await requiredAdapter("openai-codex").query(
+			codexAuth(codexToken()),
+			new AbortController().signal,
+			5_000,
+		);
+		assert.deepEqual(calls, ["https://chatgpt.com/backend-api/wham/usage"]);
+		assert.equal(
+			report.metrics.find((metric) => metric.id === "reset-credits"),
+			undefined,
+		);
+		assert.deepEqual(report.notes, ["Reset availability could not be verified."]);
+	} finally {
+		globalThis.fetch = original;
+	}
+});
+
 function requiredAdapter(id: string) {
 	const adapter = SUPPORTED_ADAPTERS.find((item) => item.id === id);
 	if (!adapter) throw new Error(`Missing test adapter: ${id}`);
@@ -941,6 +1035,23 @@ function grokAuth(): ResolvedUsageAuth {
 		fingerprint: "fp",
 		secrets: ["fixture-token"],
 		model: { provider: "xai-auth", id: "grok-4" },
+	};
+}
+
+function codexToken(accountId?: string): string {
+	const claims = accountId
+		? { "https://api.openai.com/auth": { chatgpt_account_id: accountId } }
+		: {};
+	return `e30.${Buffer.from(JSON.stringify(claims)).toString("base64url")}.sig`;
+}
+
+function codexAuth(access = codexToken("account-fixture")): ResolvedUsageAuth {
+	return {
+		actualProviderId: "openai-codex",
+		headers: { Authorization: `Bearer ${access}` },
+		fingerprint: "fp",
+		secrets: [access],
+		model: { provider: "openai-codex", id: "codex" },
 	};
 }
 

@@ -6,9 +6,9 @@
 
 支持以下提供商：
 
-- **OpenAI（ChatGPT 订阅）**：将套餐 `Plan limits` 与当前应用额度分组展示，沿用原有进度条。底部及状态事件默认展示 `Plan limits`，与 ChatGPT 用量页对齐。同时需要在 Pi 登录同一 ChatGPT 账户/工作区的 `openai-codex`：用其后端凭据从 `/wham/usage` 的 `rate_limit` 读取网页套餐窗口及积分余额，并从 `/wham/usage/chatpass/apps` 精确匹配当前应用窗口。两组各自保留百分比与重置时间，不互相冒充。`App Allowance` 是配置的使用上限，不是剩余额度；任一凭据变化都会使缓存失效。不读取浏览器 Cookie。可用账户重置票据显示为 `Account Resets`；明确确认后，通过配套 Codex 账户的重置接口兑换，并非应用专属重置接口。
+- **OpenAI（ChatGPT 订阅）**：将套餐 `Plan limits` 与当前应用额度分组展示，沿用原有进度条。底部及状态事件默认展示 `Plan limits`，与 ChatGPT 用量页对齐。同时需要在 Pi 登录同一 ChatGPT 账户/工作区的 `openai-codex`，因为 OpenAI 会拒绝 Sign in with ChatGPT 令牌访问 ChatGPT 用量和重置接口；执行一次 `/login openai-codex` 即可，当前模型仍保持 OpenAI（见[稳定性](#稳定性)）。插件用 Codex 后端凭据从 `/wham/usage` 的 `rate_limit` 读取网页套餐窗口及积分余额，并从 `/wham/usage/chatpass/apps` 精确匹配当前应用窗口。两组各自保留百分比与重置时间，不互相冒充。`App Allowance` 是配置的使用上限，不是剩余额度；任一凭据变化都会使缓存失效。不读取浏览器 Cookie。可用账户重置票据显示为 `Account Resets`；明确确认后，通过配套 Codex 账户的重置接口兑换，并非应用专属重置接口。
 
-- **OpenAI Codex**：5 小时与每周额度、模型专属额度，以及需要确认的重置次数兑换。
+- **OpenAI Codex**：5 小时与每周额度、模型专属额度，以及需要确认的重置次数兑换。`Resets Left` 只统计重置票据列表中可兑换的票据，不采用用量接口的汇总数。
 - **OpenCode Go**：5 小时、每周和每月窗口。
 - **Grok**：每周和/或每月额度；只使用 Pi 的 `xai` / `xai-auth` OAuth 凭据，并先验证账户身份。若 weekly `currentPeriod` 存在但省略了 `creditUsagePercent`，按已用 0% 处理（proto3 在周期重置后会省略 0）。统一账单账户仍会探测默认月度接口，但 weekly 窗口已经可展示时，月度探测失败不再让整次查询失败。窗口与其他提供商一样使用 `5h / 1w / 1m` 状态格式。
 - **Kimi Coding**：5 小时和每周窗口，以及额度接口返回的会员套餐。
@@ -76,7 +76,7 @@ OpenAI 和 Codex 模式都仅在确认有可兑换重置次数时显示重置菜
 
 ## OpenAI / Codex 重置安全措施
 
-OpenAI 模式使用 ChatGPT 用量页相同的 `/wham/rate-limit-reset-credits` 和 `/consume` 接口。只提供明确存在、可用、套餐支持且未过期的 `codex_rate_limits` 票据；列表查询失败时不会退回自动兑换。票据重置的是服务端定义的账户窗口，**不保证清空当前应用窗口**，确认框会说明这一范围。查询重置次数失败不会隐藏套餐和应用额度；兑换成功会使两种模式的额度缓存失效。
+OpenAI 与 Codex 模式都使用 ChatGPT 用量页相同的 `/wham/rate-limit-reset-credits` 和 `/consume` 接口，并以 Codex 账户的后端凭据认证；显示和兑换时都通过 `chatgpt-account-id` 限定为该令牌自身的账户。两种模式都只统计和提供明确存在、可用、套餐支持且未过期的 `codex_rate_limits` 票据，且始终指定具体票据兑换：仅有汇总次数或列表查询失败时，都不会退回由服务端选票的兑换。OpenAI 模式下，票据重置的是服务端定义的账户窗口，**不保证清空当前应用窗口**，确认框会说明这一范围。查询重置次数失败不会隐藏额度；兑换成功会使两种模式的额度缓存失效。
 
 兑换重置次数前，本扩展会：
 
@@ -131,7 +131,7 @@ pi --no-extensions --offline -e ./index.ts --list-models
 
 ## 稳定性
 
-OpenAI 应用额度也依赖未公开的 ChatGPT 接口。缺少配套 Codex 登录时，通过 `/login` 登录 **OpenAI Codex**，无需切换当前 OpenAI 模型。账户/工作区不匹配、找不到应用注册或额度窗口时会报告错误，不展示其他账户的额度。`App Allowance` 表示允许应用使用的套餐份额，不是剩余额度百分比。`Source` 明确标注这是 Pi Codex 登录账户内匹配应用的数据；应用 ID 匹配不是对两套令牌身份的独立验签证明。
+OpenAI 应用额度也依赖未公开的 ChatGPT 接口。OpenAI 会拒绝 Sign in with ChatGPT 令牌访问这些 ChatGPT 用量和重置接口（HTTP 401），因此必须配套 Codex 登录：用同一账户/工作区执行一次 `/login openai-codex`。它只用于读取用量，当前模型仍可保持 OpenAI。未登录时，可在 https://chatgpt.com/settings/usage 查看用量。账户/工作区不匹配、找不到应用注册或额度窗口时会报告错误，不展示其他账户的额度。`App Allowance` 表示允许应用使用的套餐份额，不是剩余额度百分比。`Source` 明确标注这是 Pi Codex 登录账户内匹配应用的数据；应用 ID 匹配不是对两套令牌身份的独立验签证明。
 
 Codex 重置、Grok 账单和 Kimi 额度依赖未公开的提供商 API，这些 API 可能发生变化。如果 API 调用失败，本扩展只会报告查询错误，不会退回到不受控制的凭据或代理路径。
 

@@ -20,7 +20,6 @@ import {
 	CODEX_RESET_CONFIRMATION_OPTIONS,
 	codexResetCount,
 	formatCodexResetOutcome,
-	genericCodexResetOption,
 	isCodexResetConfirmed,
 	resetOptionExpiration,
 	type CodexResetOption,
@@ -417,46 +416,40 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		}
 		const expectedModel = modelIdentity(current.model);
 		const isOpenAI = current.model?.provider === OPENAI_PROVIDER_ID;
-		const resetLabel = isOpenAI ? "Account" : "Codex";
+		const resetNoun = isOpenAI ? "account" : "Codex";
 		if (modelIdentity(ctx.model) !== expectedModel) throw new Error("Model changed; reset cancelled.");
-		const summaryCount = codexResetCount(current.outcome.state.report) ?? 0;
 		let auth = await awaitWithDeadline(
 			() => resolveCodexResetAuth(ctx),
 			controller.signal,
 			QUERY_TIMEOUT_MS,
-			"resolving Codex reset authentication",
+			"resolving reset authentication",
 		);
 		if (auth.usageFingerprint !== current.outcome.fingerprint) {
 			throw new Error("Account changed since usage was displayed; run /usage again.");
 		}
-		let availability;
-		try {
-			availability = await listCodexResetCredits(
-				auth,
-				controller.signal,
-				QUERY_TIMEOUT_MS,
-			);
-		} catch (error) {
-			if (isOpenAI || isAbortError(error) || summaryCount <= 0) throw error;
-			availability = {
-				availableCount: summaryCount,
-				options: [genericCodexResetOption()],
-			};
-		}
+		// A failed listing never falls back to an unscoped, server-chosen reset.
+		const availability = await listCodexResetCredits(
+			auth,
+			controller.signal,
+			QUERY_TIMEOUT_MS,
+		);
 		if (availability.availableCount <= 0 || availability.options.length === 0) {
-			ctx.ui.notify("No Codex reset credits available.", "info");
+			ctx.ui.notify(`No ${resetNoun} reset credits available.`, "info");
 			return undefined;
 		}
 		const labels = availability.options.map(
 			(option: CodexResetOption, index: number) =>
 				`${index + 1}. ${option.title} · ${resetOptionExpiration(option)}`,
 		);
-		const selected = await ctx.ui.select(`Choose a ${resetLabel} Reset`, labels);
+		const selected = await ctx.ui.select(
+			isOpenAI ? "Choose an Account Reset" : "Choose a Codex Reset",
+			labels,
+		);
 		if (!selected) return undefined;
 		const option = availability.options[labels.indexOf(selected)];
 		if (!option) return undefined;
 		const confirmation = await ctx.ui.select(
-			`Redeem one ${resetLabel} reset?\n${option.title}\n${option.description}\n${resetOptionExpiration(option)}${isOpenAI ? "\nConsumes a reset from the companion Codex account. Only ticket-supported account windows are reset; clearing this app's quota is not guaranteed." : ""}`,
+			`Redeem one ${resetNoun} reset?\n${option.title}\n${option.description}\n${resetOptionExpiration(option)}${isOpenAI ? "\nConsumes a reset from the companion Codex account. Only ticket-supported account windows are reset; clearing this app's quota is not guaranteed." : ""}`,
 			[...CODEX_RESET_CONFIRMATION_OPTIONS],
 		);
 		if (!isCodexResetConfirmed(confirmation)) return undefined;
@@ -470,7 +463,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 					() => resolveCodexResetAuth(ctx),
 					controller.signal,
 					QUERY_TIMEOUT_MS,
-					"revalidating Codex reset authentication",
+					"revalidating reset authentication",
 				);
 				if (
 					modelIdentity(ctx.model) !== expectedModel ||

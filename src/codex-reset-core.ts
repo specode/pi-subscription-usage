@@ -43,13 +43,6 @@ export function codexResetCount(report: UsageReport): number | undefined {
 		: undefined;
 }
 
-export function genericCodexResetOption(): CodexResetOption {
-	return {
-		title: "Full Reset",
-		description: "Resets the current usage windows.",
-	};
-}
-
 export function resetOptionExpiration(option: CodexResetOption): string {
 	if (option.expiresAt === undefined) return "No Expiry";
 	const expiration = new Date(option.expiresAt * 1_000);
@@ -105,9 +98,13 @@ export function verifyCodexStoredOAuthCredential(
 	return accountId;
 }
 
+/**
+ * Offer only explicit, plan-supported, unexpired tickets. Redemption is
+ * irreversible, so a summary count alone never becomes a server-chosen reset.
+ */
 export function normalizeCodexResetCreditsPayload(
 	payload: Record<string, unknown>,
-	options: { requireExplicitCredit?: boolean; now?: number } = {},
+	options: { now?: number } = {},
 ): CodexResetAvailability {
 	const availableCount = nonnegativeInteger(payload.available_count);
 	if (availableCount === undefined) {
@@ -128,9 +125,9 @@ export function normalizeCodexResetCreditsPayload(
 		) {
 			continue;
 		}
-		if (options.requireExplicitCredit && credit.is_supported_by_plan !== true) continue;
+		if (credit.is_supported_by_plan !== true) continue;
 		const option = normalizeResetOption(credit);
-		if (options.requireExplicitCredit && option.expiresAt !== undefined &&
+		if (option.expiresAt !== undefined &&
 			option.expiresAt * 1_000 <= (options.now ?? Date.now())) continue;
 		resetOptions.push(option);
 	}
@@ -140,12 +137,7 @@ export function normalizeCodexResetCreditsPayload(
 			(right.expiresAt ?? Number.MAX_SAFE_INTEGER),
 	);
 	resetOptions.splice(Math.min(availableCount, 32));
-	if (!options.requireExplicitCredit && availableCount > 0 && resetOptions.length === 0)
-		resetOptions.push(genericCodexResetOption());
-	return {
-		availableCount: options.requireExplicitCredit ? resetOptions.length : availableCount,
-		options: resetOptions,
-	};
+	return { availableCount: resetOptions.length, options: resetOptions };
 }
 
 export function parseCodexResetOutcome(
@@ -207,7 +199,7 @@ function isOutcomeCode(value: unknown): value is CodexResetOutcomeCode {
 	);
 }
 
-function codexAccountIdFromAccessToken(access: string): string | undefined {
+export function codexAccountIdFromAccessToken(access: string): string | undefined {
 	try {
 		const parts = access.split(".");
 		if (parts.length !== 3 || !parts[1]) return undefined;

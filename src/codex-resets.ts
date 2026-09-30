@@ -41,15 +41,15 @@ export async function resolveCodexResetAuth(
 	}
 	const expectedModel = `${model.provider}/${model.id}`;
 	const adapter = adapterForProvider(model.provider);
-	if (!adapter) throw new Error("OpenAI Codex usage support is unavailable.");
+	if (!adapter) throw new Error(`Usage support for ${model.provider} is unavailable.`);
 	const auth = await resolveUsageAuth(ctx, adapter, salt);
 	if (`${ctx.model?.provider}/${ctx.model?.id}` !== expectedModel) {
 		throw new Error(
-			"The current model changed while resolving Codex reset authentication.",
+			"The current model changed while resolving reset authentication.",
 		);
 	}
 	if (!auth)
-		throw new Error("No runtime credential is configured for OpenAI Codex.");
+		throw new Error(`No runtime credential is configured for ${adapter.displayName}.`);
 
 	const resolvedAccess =
 		bearerToken(headerValue(auth.headers, "Authorization")) ?? auth.apiKey;
@@ -98,7 +98,6 @@ export async function listCodexResetCredits(
 			timeoutMs,
 			"Codex reset endpoint",
 		),
-		{ requireExplicitCredit: auth.actualProviderId === OPENAI_PROVIDER_ID },
 	);
 }
 
@@ -111,8 +110,8 @@ export async function consumeCodexResetCredit(
 ): Promise<CodexResetOutcome> {
 	if (!redeemRequestId)
 		throw new Error("Codex reset request ID must not be empty.");
-	if (auth.actualProviderId === OPENAI_PROVIDER_ID && !option.creditId) {
-		throw new Error("OpenAI account resets require an explicitly selected credit.");
+	if (!option.creditId) {
+		throw new Error("Account resets require an explicitly selected credit.");
 	}
 	return parseCodexResetOutcome(
 		await fetchProviderJson(
@@ -125,7 +124,7 @@ export async function consumeCodexResetCredit(
 				method: "POST",
 				body: {
 					redeem_request_id: redeemRequestId,
-					...(option.creditId ? { credit_id: option.creditId } : {}),
+					credit_id: option.creditId,
 				},
 			},
 		),

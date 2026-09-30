@@ -9,7 +9,10 @@ import {
 	redactUsageError,
 } from "./core.ts";
 import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
-import { normalizeCodexResetCreditsPayload } from "./codex-reset-core.ts";
+import {
+	codexAccountIdFromAccessToken,
+	normalizeCodexResetCreditsPayload,
+} from "./codex-reset-core.ts";
 import {
 	codexEmailFromAuthorization,
 	normalizeCodexUsage,
@@ -35,6 +38,8 @@ import type {
 } from "./types.ts";
 
 const CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
+const RESET_CREDITS_URL =
+	"https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 const OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage";
 const KIMI_USAGE_URL = "https://api.kimi.com/coding/v1/usages";
 const GROK_USER_URL = "https://cli-chat-proxy.grok.com/v1/user";
@@ -68,15 +73,11 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 				fetchProviderJson(CODEX_USAGE_URL, auth, signal, timeoutMs, "OpenAI plan usage endpoint"),
 			]);
 			const report = normalizeOpenAIPlanUsage(appPayload, planPayload, auth.openaiClientId, Date.now());
-			try {
-				const credits = normalizeCodexResetCreditsPayload(await fetchProviderJson(
-					"https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
-					auth, signal, timeoutMs, "Account reset credits endpoint",
-				), { requireExplicitCredit: true });
-				report.metrics.push({ id: "reset-credits", label: "Account Resets", value: credits.availableCount, unit: "count" });
-			} catch (error) {
-				if (isAbortError(error) || signal.aborted) throw error;
+			const resetCount = await fetchRedeemableResetCount(auth, signal, timeoutMs);
+			if (resetCount === undefined) {
 				report.notes = ["Account reset availability could not be verified."];
+			} else {
+				report.metrics.push({ id: "reset-credits", label: "Account Resets", value: resetCount, unit: "count" });
 			}
 			return report;
 		},
@@ -91,17 +92,30 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 			label: "ChatGPT subscription limits",
 		},
 		async query(auth, signal, timeoutMs) {
-			return normalizeCodexUsage(
-				await fetchProviderJson(
+			const [payload, resetCount] = await Promise.all([
+				fetchProviderJson(
 					CODEX_USAGE_URL,
 					auth,
 					signal,
 					timeoutMs,
 					"Codex usage endpoint",
 				),
+				fetchRedeemableResetCount(auth, signal, timeoutMs),
+			]);
+			// The usage summary also counts tickets the reset menu would refuse.
+			const report = normalizeCodexUsage(
+				{
+					...payload,
+					rate_limit_reset_credits:
+						resetCount === undefined ? undefined : { available_count: resetCount },
+				},
 				Date.now(),
 				codexEmailFromAuthorization(auth.headers.Authorization),
 			);
+			if (resetCount === undefined) {
+				report.notes = ["Reset availability could not be verified."];
+			}
+			return report;
 		},
 	},
 	{
@@ -266,7 +280,8 @@ export async function resolveUsageAuth(
 		const codexAdapter = adapterForProvider(CODEX_PROVIDER_ID)!;
 		const companion = await resolveUsageAuth(ctx, { ...codexAdapter, requiresOAuth: true }, salt);
 		if (!companion) {
-			throw new Error("OpenAI app usage also requires OpenAI Codex OAuth in Pi for the same ChatGPT account/workspace. Run /login for OpenAI Codex; keep OpenAI as the active model.");
+			// ChatGPT backend usage rejects these app tokens (401 rejected_by_access_enforcement).
+			throw new Error("OpenAI rejects Sign in with ChatGPT tokens for ChatGPT usage and reset data. Run /login openai-codex once with the same ChatGPT account/workspace; it is used only to read usage, so keep OpenAI as the active model. You can also check https://chatgpt.com/settings/usage.");
 		}
 		return {
 			actualProviderId: model.provider,
@@ -287,6 +302,37 @@ export async function resolveUsageAuth(
 		secrets,
 		model,
 	};
+}
+
+/**
+ * Undefined means unverified: usage still displays, but no reset is offered.
+ * Scope the listing to the backend token's own account, as redemption does.
+ */
+async function fetchRedeemableResetCount(
+	auth: ResolvedUsageAuth,
+	signal: AbortSignal,
+	timeoutMs: number,
+): Promise<number | undefined> {
+	const access = /^Bearer\s+(\S+)$/iu.exec(
+		headerValue(auth.headers, "Authorization") ?? "",
+	)?.[1];
+	const accountId = access ? codexAccountIdFromAccessToken(access) : undefined;
+	if (!accountId) return undefined;
+	try {
+		return normalizeCodexResetCreditsPayload(
+			await fetchProviderJson(
+				RESET_CREDITS_URL,
+				auth,
+				signal,
+				timeoutMs,
+				"Reset credits endpoint",
+				{ headers: { "chatgpt-account-id": accountId } },
+			),
+		).availableCount;
+	} catch (error) {
+		if (isAbortError(error) || signal.aborted) throw error;
+		return undefined;
+	}
 }
 
 export async function queryProviderUsage(

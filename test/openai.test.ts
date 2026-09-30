@@ -90,19 +90,23 @@ test("API audience and direct-sharing scope are required for registration routin
 });
 
 test("OpenAI resolves two runtime credentials and sends only backend auth", async () => {
-	const auth = await resolveUsageAuth(context(), adapter);
+	const backend = `e30.${Buffer.from(JSON.stringify({ "https://api.openai.com/auth": { chatgpt_account_id: "acct-fixture" } })).toString("base64url")}.sig`;
+	const auth = await resolveUsageAuth(context({ backend }), adapter);
 	assert.ok(auth);
 	assert.equal(auth.actualProviderId, "openai");
 	assert.equal(auth.model.provider, "openai");
 	assert.equal(auth.openaiClientId, clientId);
-	assert.deepEqual(auth.headers, { Authorization: "Bearer backend-secret" });
+	assert.deepEqual(auth.headers, { Authorization: `Bearer ${backend}` });
 	assert.equal(auth.apiKey, undefined);
 	const original = globalThis.fetch;
 	globalThis.fetch = async (url, init) => {
-		assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer backend-secret");
+		assert.equal((init?.headers as Record<string, string>).Authorization, `Bearer ${backend}`);
 		assert.equal(JSON.stringify(init).includes(token()), false);
 		if (url === "https://chatgpt.com/backend-api/wham/usage") return new Response(JSON.stringify(planPayload));
-		if (url === "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits") return new Response(JSON.stringify({ available_count: 0, credits: [] }));
+		if (url === "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits") {
+			assert.equal((init?.headers as Record<string, string>)["chatgpt-account-id"], "acct-fixture");
+			return new Response(JSON.stringify({ available_count: 0, credits: [] }));
+		}
 		assert.equal(url, "https://chatgpt.com/backend-api/wham/usage/chatpass/apps");
 		return new Response(JSON.stringify(payload));
 	};
@@ -138,6 +142,18 @@ test("missing or invalid Codex companion remains an authentication failure", asy
 		assert.equal(error instanceof UsageUnsupportedError, false);
 		return true;
 	});
+});
+
+test("missing Codex companion explains the OpenAI restriction and the one-time fix", async () => {
+	for (const options of [{ codexOAuth: false }, { companion: false }]) {
+		await assert.rejects(resolveUsageAuth(context(options), adapter), (error: Error) => {
+			assert.match(error.message, /rejects Sign in with ChatGPT tokens/u);
+			assert.match(error.message, /\/login openai-codex once/u);
+			assert.match(error.message, /keep OpenAI as the active model/u);
+			assert.match(error.message, /https:\/\/chatgpt\.com\/settings\/usage/u);
+			return true;
+		});
+	}
 });
 
 test("OpenAI plan and app windows stay separate; footer and event use website plan limits", () => {

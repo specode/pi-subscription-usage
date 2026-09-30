@@ -60,20 +60,30 @@ test("OpenAI reset list requires supported explicit tickets and excludes expired
 		{ ...credit, id: "expired", expires_at: "2020-01-01T00:00:00Z" },
 		{ ...credit, id: "unknown", reset_type: "unknown" },
 		{ ...credit, id: "redeemed", status: "redeemed" },
-	] }, { requireExplicitCredit: true, now: Date.parse("2026-01-01") });
+	] }, { now: Date.parse("2026-01-01") });
 	assert.equal(result.availableCount, 1);
 	assert.equal(result.options[0].creditId, "credit-test");
-	assert.equal(normalizeCodexResetCreditsPayload({ available_count: 2 }, { requireExplicitCredit: true }).availableCount, 0);
+	assert.equal(normalizeCodexResetCreditsPayload({ available_count: 2 }).availableCount, 0);
 });
 
-test("OpenAI consume refuses an automatic unscoped credit selection", async () => {
-	const auth = await resolveCodexResetAuth(fixture().ctx as never);
-	await assert.rejects(consumeCodexResetCredit(auth, { title: "Reset", description: "" }, "request", new AbortController().signal, 100), /explicitly selected/);
+test("consume refuses an automatic unscoped credit selection in both modes", async () => {
+	const original = globalThis.fetch;
+	let requests = 0;
+	// Count instead of relying on an outer guard: a regression must never reach the network.
+	globalThis.fetch = async () => { requests += 1; return new Response("{}"); };
+	try {
+		for (const model of [openai, codex]) {
+			const f = fixture(); f.ctx.model = model;
+			const auth = await resolveCodexResetAuth(f.ctx as never);
+			await assert.rejects(consumeCodexResetCredit(auth, { title: "Reset", description: "" }, "request", new AbortController().signal, 100), /explicitly selected/);
+		}
+		assert.equal(requests, 0);
+	} finally { globalThis.fetch = original; }
 });
 
 const scenarios = [
 	"cancel", "confirm", "retry", "change-app", "change-backend", "switch-model",
-	"missing-app", "list-failed", "retry-change-app", "retry-change-backend",
+	"missing-app", "list-failed", "display-list-failed", "retry-change-app", "retry-change-backend",
 	"retry-get-failed", "retry-cancel", "refresh-failed", "publish-failed",
 	"status-failed", "already-redeemed",
 ] as const;
@@ -81,7 +91,7 @@ const scenarios = [
 for (const provider of ["openai", "openai-codex"] as const) {
 for (const scenario of scenarios) {
 	const isOpenAI = provider === "openai";
-	if (!isOpenAI && ["change-app", "missing-app", "list-failed", "retry-change-app", "retry-get-failed"].includes(scenario)) continue;
+	if (!isOpenAI && ["change-app", "missing-app", "retry-change-app", "retry-get-failed"].includes(scenario)) continue;
 	test(`${provider} reset UI: ${scenario}`, { timeout: 5000 }, async () => {
 		const f = fixture();
 		if (!isOpenAI) f.ctx.model = codex;
@@ -91,7 +101,7 @@ for (const scenario of scenarios) {
 		const violations: unknown[] = [];
 		// Application catches must not swallow test assertion failures.
 		const check = (assertion: () => void) => { try { assertion(); } catch (error) { violations.push(error); } };
-		let confirmationSeen = false, phase: "startup" | "command" = "startup";
+		let confirmationSeen = false, redeemChosen = false, phase: "startup" | "command" = "startup";
 		let startupDone!: () => void;
 		const startup = new Promise<void>(resolve => { startupDone = resolve; });
 		f.ctx.ui.notify = text => { notices.push(text); };
@@ -117,7 +127,8 @@ for (const scenario of scenarios) {
 				// Bound retries so a broken success path fails rather than hanging.
 				return scenario === "retry-cancel" || menus.filter(m => m.title === title).length > 1 ? "Cancel" : options[0];
 			}
-			check(() => assert.ok(title.startsWith("Reset Credits:") || title.startsWith("Choose a ")));
+			check(() => assert.ok(title.startsWith("Reset Credits:") || title.startsWith("Choose ")));
+			if (title.startsWith("Reset Credits:")) redeemChosen = true;
 			return options[0];
 		};
 		const original = globalThis.fetch;
@@ -149,8 +160,11 @@ for (const scenario of scenarios) {
 				return new Response(JSON.stringify(scenario === "missing-app" && confirmationSeen ? { items: [] } : apps));
 			}
 			check(() => assert.ok(String(url).endsWith("/rate-limit-reset-credits")));
-			// Target redemption's explicit list, not background/display reads.
-			if (scenario === "list-failed" && phase === "command" && headers["chatgpt-account-id"] && !confirmationSeen) throw new Error("list unavailable");
+			// Display and redemption listings are scoped to the same backend account.
+			check(() => assert.equal(headers["chatgpt-account-id"], "account-test"));
+			// Fail only /usage's display read, or only redemption's own listing.
+			const failList = scenario === "list-failed" ? redeemChosen : scenario === "display-list-failed" && !redeemChosen;
+			if (failList && phase === "command" && !confirmationSeen) throw new Error("list unavailable");
 			return new Response(JSON.stringify({ available_count: posts.length ? 0 : 1, credits: posts.length ? [] : [credit] }));
 		};
 		try {
@@ -167,10 +181,12 @@ for (const scenario of scenarios) {
 			phase = "command";
 			await commands.get("usage")!.handler("", f.ctx);
 			assert.deepEqual(violations, []);
-			assert.ok(menus.some(m => m.title.startsWith("Reset Credits:")));
-			assert.equal(confirmationSeen, scenario !== "list-failed");
-			assert.equal(menus.some(m => m.title.startsWith("Choose a ")), scenario !== "list-failed");
-			const zeroPosts = ["cancel", "change-app", "change-backend", "switch-model", "missing-app", "list-failed"].includes(scenario);
+			const offered = scenario !== "display-list-failed";
+			const listed = offered && scenario !== "list-failed";
+			assert.equal(menus.some(m => m.title.startsWith("Reset Credits:")), offered);
+			assert.equal(confirmationSeen, listed);
+			assert.equal(menus.some(m => m.title.startsWith("Choose ")), listed);
+			const zeroPosts = ["cancel", "change-app", "change-backend", "switch-model", "missing-app", "list-failed", "display-list-failed"].includes(scenario);
 			assert.equal(posts.length, zeroPosts ? 0 : scenario === "retry" ? 2 : 1);
 			const messages = notices.join("\n");
 			const uncertain = scenario.startsWith("retry-");
@@ -190,6 +206,7 @@ for (const scenario of scenarios) {
 			if (scenario === "switch-model") assert.match(messages, /changed; reset not submitted/);
 			if (scenario === "missing-app") assert.match(messages, /not uniquely found/);
 			if (scenario === "list-failed") assert.match(messages, /list unavailable/);
+			if (scenario === "display-list-failed") assert.match(messages, /availability could not be verified/);
 			if (scenario === "cancel") assert.doesNotMatch(messages, /failed|uncertain|redeemed/);
 			if (scenario === "retry") assert.equal(posts[0].redeem_request_id, posts[1].redeem_request_id);
 		} finally {
