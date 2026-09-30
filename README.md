@@ -6,6 +6,8 @@ A Pi extension that shows the active account's subscription quota in one consist
 
 Supported providers:
 
+- **OpenAI (ChatGPT subscription)** — app-specific subscription windows for Pi's `openai` OAuth login, rendered with the same quota bars and footer. Also requires `openai-codex` OAuth in Pi for the same ChatGPT account/workspace: its backend credential reads `/wham/usage/chatpass/apps`, and the active OpenAI token's application ID must match exactly one returned registration. Only that application's windows are shown, never Codex's quota. Both credentials participate in cache invalidation. No browser cookies are used, and no reset action is offered for this provider.
+
 - **OpenAI Codex** — 5-hour and weekly quota, model-specific quota, and confirmed reset-credit redemption.
 - **OpenCode Go** — 5-hour, weekly, and monthly windows.
 - **Grok** — weekly and/or monthly quota using only Pi's `xai` / `xai-auth` OAuth credentials, with account identity verification. A weekly `currentPeriod` with an omitted `creditUsagePercent` is treated as 0% used (proto3 omits zero after reset). Unified SuperGrok billing is still probed from the default monthly endpoint, but that probe is no longer required when the weekly window is already displayable. Windows use the same `5h / 1w / 1m` status format as other providers.
@@ -126,6 +128,8 @@ pi --no-extensions --offline -e ./index.ts --list-models
 ```
 
 ## Stability
+
+OpenAI app usage also depends on an undocumented ChatGPT endpoint. If the companion Codex login is missing, sign in to **OpenAI Codex** through `/login` without changing the active OpenAI model. An account/workspace mismatch, missing registration, or missing windows produces an error rather than displaying another account's quota. `Plan Allowance` is the configured share the app may use, not its remaining percentage. `Source` identifies this as the matching app in Pi's Codex account; matching application IDs is not independent cryptographic verification of both token identities.
 
 Codex reset, Grok billing, and Kimi usage rely on undocumented provider APIs that may change. When an API fails, the extension reports the query error and does not fall back to uncontrolled credential or proxy paths.
 

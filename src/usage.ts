@@ -43,6 +43,7 @@ import {
 	adapterForProvider,
 	queryProviderUsage,
 	resolveUsageAuth,
+	UsageUnsupportedError,
 } from "./query.ts";
 import type {
 	ProviderUsageState,
@@ -187,7 +188,9 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				state: {
 					providerId: adapter.id,
 					providerName: adapter.displayName,
-					status: "auth-unavailable",
+					status: error instanceof UsageUnsupportedError
+						? "unsupported"
+						: "auth-unavailable",
 					message: errorMessage(error),
 				},
 			};

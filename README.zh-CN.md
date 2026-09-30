@@ -6,6 +6,8 @@
 
 支持以下提供商：
 
+- **OpenAI（ChatGPT 订阅）**：读取 Pi `openai` OAuth 登录对应应用的订阅窗口，沿用原有进度条和底部样式。同时需要在 Pi 登录同一 ChatGPT 账户/工作区的 `openai-codex`：用其后端凭据读取 `/wham/usage/chatpass/apps`，并将当前 OpenAI Token 的应用 ID 与返回的注册应用精确匹配。只展示匹配应用的额度，不使用 Codex 自身额度；任一凭据变化都会使缓存失效。不读取浏览器 Cookie，也不提供此模式下的重置操作。
+
 - **OpenAI Codex**：5 小时与每周额度、模型专属额度，以及需要确认的重置次数兑换。
 - **OpenCode Go**：5 小时、每周和每月窗口。
 - **Grok**：每周和/或每月额度；只使用 Pi 的 `xai` / `xai-auth` OAuth 凭据，并先验证账户身份。若 weekly `currentPeriod` 存在但省略了 `creditUsagePercent`，按已用 0% 处理（proto3 在周期重置后会省略 0）。统一账单账户仍会探测默认月度接口，但 weekly 窗口已经可展示时，月度探测失败不再让整次查询失败。窗口与其他提供商一样使用 `5h / 1w / 1m` 状态格式。
@@ -126,6 +128,8 @@ pi --no-extensions --offline -e ./index.ts --list-models
 ```
 
 ## 稳定性
+
+OpenAI 应用额度也依赖未公开的 ChatGPT 接口。缺少配套 Codex 登录时，通过 `/login` 登录 **OpenAI Codex**，无需切换当前 OpenAI 模型。账户/工作区不匹配、找不到应用注册或额度窗口时会报告错误，不展示其他账户的额度。`Plan Allowance` 表示允许应用使用的套餐份额，不是剩余额度百分比。`Source` 明确标注这是 Pi Codex 登录账户内匹配应用的数据；应用 ID 匹配不是对两套令牌身份的独立验签证明。
 
 Codex 重置、Grok 账单和 Kimi 额度依赖未公开的提供商 API，这些 API 可能发生变化。如果 API 调用失败，本扩展只会报告查询错误，不会退回到不受控制的凭据或代理路径。
 

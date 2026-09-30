@@ -21,6 +21,11 @@ import {
 	shouldProbeGrokMonthly,
 } from "./providers/grok.ts";
 import { normalizeKimiUsage } from "./providers/kimi.ts";
+import {
+	OPENAI_PROVIDER_ID,
+	normalizeOpenAIUsage,
+	openaiClientIdFromAuthorization,
+} from "./providers/openai.ts";
 import { normalizeOpenCodeGoUsage } from "./providers/opencode-go.ts";
 import type {
 	ResolvedUsageAuth,
@@ -48,6 +53,28 @@ type PiModel = NonNullable<ExtensionContext["model"]>;
 export const AUTH_FINGERPRINT_SALT = randomBytes(32);
 
 export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
+	{
+		id: OPENAI_PROVIDER_ID,
+		displayName: "OpenAI (ChatGPT subscription)",
+		providerIds: [OPENAI_PROVIDER_ID],
+		officialOrigins: ["https://api.openai.com"],
+		requiresOAuth: true,
+		semantics: { kind: "consumer-subscription", label: "ChatGPT app subscription limits" },
+		async query(auth, signal, timeoutMs) {
+			if (!auth.openaiClientId) throw new Error("OpenAI application identity is unavailable.");
+			return normalizeOpenAIUsage(
+				await fetchProviderJson(
+					`${CODEX_USAGE_URL}/chatpass/apps`,
+					auth,
+					signal,
+					timeoutMs,
+					"OpenAI app usage endpoint",
+				),
+				auth.openaiClientId,
+				Date.now(),
+			);
+		},
+	},
 	{
 		id: CODEX_PROVIDER_ID,
 		displayName: "OpenAI Codex",
@@ -169,18 +196,26 @@ export function adapterForProvider(
 	);
 }
 
+/** A configured provider mode that does not offer subscription usage. */
+export class UsageUnsupportedError extends Error {
+	name = "UsageUnsupportedError";
+}
+
 export async function resolveUsageAuth(
 	ctx: ExtensionContext,
 	adapter: UsageProviderAdapter,
 	salt: Uint8Array = AUTH_FINGERPRINT_SALT,
 ): Promise<ResolvedUsageAuth | undefined> {
 	const current = ctx.model;
+	const UnsupportedModeError = adapter.id === OPENAI_PROVIDER_ID
+		? UsageUnsupportedError
+		: Error;
 	if (
 		current &&
 		adapter.providerIds.includes(current.provider) &&
 		!hasOfficialOrigin(current.baseUrl, adapter)
 	) {
-		throw new Error(
+		throw new UnsupportedModeError(
 			`${adapter.displayName} usage cannot send a custom provider credential to an official usage endpoint.`,
 		);
 	}
@@ -199,14 +234,14 @@ export async function resolveUsageAuth(
 		);
 	if (!model) return undefined;
 	if (adapter.requiresOAuth && !ctx.modelRegistry.isUsingOAuth(model)) {
-		throw new Error(
+		throw new UnsupportedModeError(
 			`${adapter.displayName} usage requires Pi OAuth; API-key auth is not accepted.`,
 		);
 	}
 	const result = await ctx.modelRegistry.getProviderAuth(model.provider);
 	if (!result) return undefined;
 	if (result.auth.baseUrl && !hasOfficialOrigin(result.auth.baseUrl, adapter)) {
-		throw new Error(
+		throw new UnsupportedModeError(
 			`${adapter.displayName} usage cannot send a proxy-resolved credential to an official usage endpoint.`,
 		);
 	}
@@ -220,6 +255,24 @@ export async function resolveUsageAuth(
 		headerValue(result.auth.headers, "Authorization"),
 		authorization,
 	].filter((value): value is string => Boolean(value));
+	if (adapter.id === OPENAI_PROVIDER_ID) {
+		const clientId = openaiClientIdFromAuthorization(authorization);
+		const codexAdapter = adapterForProvider(CODEX_PROVIDER_ID)!;
+		const companion = await resolveUsageAuth(ctx, { ...codexAdapter, requiresOAuth: true }, salt);
+		if (!companion) {
+			throw new Error("OpenAI app usage also requires OpenAI Codex OAuth in Pi for the same ChatGPT account/workspace. Run /login for OpenAI Codex; keep OpenAI as the active model.");
+		}
+		return {
+			actualProviderId: model.provider,
+			model,
+			openaiClientId: clientId,
+			// Only the backend credential is sent to ChatGPT. The active API token
+			// is used locally for registration matching and cache invalidation.
+			headers: companion.headers,
+			fingerprint: fingerprintResolvedAuth({ apiKey: authorization, headers: companion.headers }, salt),
+			secrets: [...secrets, ...companion.secrets, clientId],
+		};
+	}
 	return {
 		actualProviderId: model.provider,
 		apiKey: result.auth.apiKey,

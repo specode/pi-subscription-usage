@@ -49,6 +49,8 @@ export interface UsageReport {
 
 export interface ResolvedUsageAuth {
 	actualProviderId: string;
+	/** Active OpenAI OAuth registration, matched against the ChatGPT app list. */
+	openaiClientId?: string;
 	apiKey?: string;
 	headers: Record<string, string>;
 	fingerprint: string;
