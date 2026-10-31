@@ -2,33 +2,58 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-在 [Pi](https://github.com/earendil-works/pi-mono) 终端底部状态栏与 `/usage` 面板中，统一查看当前订阅账号的实时额度——支持 OpenAI (ChatGPT)、OpenAI Codex、OpenCode Go、xAI Grok、Kimi Coding 和 Antigravity。
+一个 [Pi](https://github.com/earendil-works/pi-mono) 扩展：在底部状态栏显示当前订阅还剩多少额度，输入 `/usage` 查看完整明细。
 
-- **多平台统一视图**：以一致的进度条和 `MM/DD HH:mm` 重置时间展示 5 小时、每周、每月及模型专属额度窗口。
-- **底部栏实时倒计时**：状态栏自动显示紧凑摘要（如 `5h 99% ↻2h13m · 1w 85% ↻3d4h`），每轮对话后及每 5 分钟自动刷新。
-- **安全的重置券兑换**：支持查看并兑换 OpenAI / Codex 官方额度重置次数，内置严格的账号核验与二次确认。
-- **零凭据外泄风险**：仅在内存中通过 Pi 官方接口读取 OAuth 凭据，不读取浏览器 Cookie，也不改写任何模型请求。
+底部状态栏效果：
 
----
+```text
+5h 99% ↻2h13m · 1w 85% ↻3d4h
+```
 
-## 前置依赖
+`/usage` 输出示例：
 
-- 已安装 [Pi](https://github.com/earendil-works/pi-mono)，并通过 `/login` 登录以下任一支持的订阅账号：
+```text
+OpenAI Codex
+  Shared Across Models:
+    5h Window     ████████████   99% left · resets 08/27 12:13
+    1w Window     ██████████░░   85% left · resets 08/30 14:00
 
-| 提供商 | 需要在 Pi 登录的凭据 | 展示的额度窗口 | 手动重置额度 |
-| --- | --- | --- | --- |
-| **OpenAI (ChatGPT)** | `openai` **以及** `openai-codex`（同一账号/工作区）¹ | 套餐总限额 (`Plan limits`) + 当前应用限额 | 支持 (`Account Resets`) |
-| **OpenAI Codex** | `openai-codex` | `5h`、`1w`、各模型独立窗口 | 支持 (`Resets Left`) |
-| **OpenCode Go** | `opencode` | `5h`、`1w`、`1m` | — |
-| **xAI Grok** | `xai` / `xai-auth` | `1w` 和/或 `1m` | — |
-| **Kimi Coding** | `kimi` | `5h`、`1w`、会员套餐等级 | — |
-| **Antigravity** | `antigravity`² | `5h` + `1w` (Gemini 系列), `5h` + `1w` (Claude/GPT 系列), `1w` (Argon 系列) | — |
+  gpt-5.6-spark:
+    5h Window     █░░░░░░░░░░░   10% left · resets 08/27 11:40
 
-> ¹ **为什么 OpenAI 模式需要执行一次 `/login openai-codex`？** OpenAI 的用量与重置接口会拒绝 `Sign in with ChatGPT` 令牌（返回 `HTTP 401`）。用同一个 ChatGPT 账号/工作区执行一次 `/login openai-codex` 后，插件即可借用该凭据读取用量，日常对话模型仍可保持为 `openai`。
->
-> ² **Antigravity 依赖 [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) 插件。** Pi 没有内置 Antigravity provider，需先执行 `pi install npm:pi-antigravity`，再执行 `/login antigravity`。额度汇总接口需要 Google AI 付费订阅；免费账号会显示为不支持，而不是报错。
+  Account:
+    Email         user@example.com
+    Plan          Pro
+    Resets Left   2
+    Extra Credit  none
+```
 
----
+## 支持的提供商
+
+登录方法：输入 `/login`，先选 `Sign in with an account`（下表记为 Account）或 `Sign in with an API key`（下表记为 API key），再在列表里选下表中的名称。Pi 界面只有英文，这里的选项名称都按界面原文写。
+
+| 提供商 | `/login` 中选择 | 显示内容 | 重置券 | 额外扩展 |
+| --- | --- | --- | --- | --- |
+| OpenAI (ChatGPT) | Account → `OpenAI`，以及 Account → `OpenAI Codex (legacy)` | ChatGPT 套餐限额、当前应用限额 | 支持（`Account Resets`） | |
+| OpenAI Codex | Account → `OpenAI Codex (legacy)` | `5h`、`1w`、模型专属窗口、账号邮箱 | 支持（`Resets Left`） | |
+| OpenCode Go | API key → `OpenCode Go` | `5h`、`1w`、`1m` | — | |
+| xAI Grok | Account → `xAI` | `1w` 和/或 `1m` | — | |
+| Kimi Coding | Account → `Kimi For Coding` | `5h`、`1w`、会员等级 | — | |
+| Antigravity | Account → `Antigravity` | Gemini（`5h`、`1w`）、Claude 与 GPT（`5h`、`1w`）、Gemini 4 Argon（`1w`）、套餐、邮箱、项目 | — | [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) |
+
+### 提供商说明
+
+#### OpenAI (ChatGPT)
+
+用同一个 ChatGPT 账号和工作区，分别登录 `OpenAI` 和 `OpenAI Codex (legacy)`，平时对话继续用 `OpenAI` 下的模型就行。OpenAI 的用量接口不认 `OpenAI` 这个登录，所以扩展只借 `OpenAI Codex (legacy)` 的登录来读额度。`/usage` 会将网页端的套餐总限额（`Plan limits`）与当前应用限额分开显示（`App Allowance` 表示该应用的配额上限比例，而非剩余额度），底部状态栏显示 `Plan limits`。
+
+#### xAI Grok
+
+用 SuperGrok 账号登录（Account → `xAI`）。用 xAI 的 API Key 登录看不到订阅额度。如果你装的是第三方扩展 `pi-xai-oauth`，用它登录也可以。
+
+#### Antigravity
+
+需先安装 [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity)（`pi install npm:pi-antigravity`），之后 `/login` 的 `Sign in with an account` 列表里才会出现 `Antigravity`。额度分为三个独立的共享池：Gemini 模型（`5h` 与 `1w`）、Claude 与 GPT 模型（`5h` 与 `1w`）、Gemini 4 Argon（`1w`）。底部状态栏显示当前所用模型对应的额度池：用 Claude 或 GPT-OSS 模型时显示 Claude 与 GPT 池，用 Gemini 4 Argon 时显示 Argon 池，其他 Gemini 模型显示 Gemini 池。额度数据只对 Google AI 付费订阅开放；免费账号在 `/usage` 里显示 `Unsupported`，底部状态栏不显示内容，不会报错。
 
 ## 安装
 
@@ -38,43 +63,37 @@
 pi install npm:@specode/pi-subscription-usage
 ```
 
-或直接从 GitHub 安装：
+从 GitHub 安装：
 
 ```bash
 pi install git:github.com/specode/pi-subscription-usage
 ```
 
-本地开发调试：
+从本地目录安装（开发调试）：
 
 ```bash
-pi install /absolute/path/to/pi-subscription-usage
+pi install /path/to/pi-subscription-usage
 ```
 
-> **提示**：Pi 扩展包拥有当前用户的系统权限，安装第三方包前建议先审阅源码。
+## 使用说明
 
----
+按上面的方法登录，再选一个该提供商的模型，之后：
 
-## 快速开始
+- 底部状态栏会自动显示当前额度窗口，在每轮对话结束后及每 5 分钟刷新一次（带 5 分钟缓存）。
+- 执行 `/usage` 会跳过缓存直接拉取最新数据，显示进度条、重置时间（`MM/DD HH:mm`）及账号信息。
 
-1. 确保已在 Pi 中通过 `/login` 登录对应订阅账号。
-2. 随时输入以下命令查看实时额度详情：
+### 使用重置券（OpenAI 与 Codex）
 
-```text
-/usage
-```
+OpenAI 或 Codex 账号里有可用的限额重置券时，`/usage` 会提供使用入口：
 
-每次执行 `/usage` 都会跳过本地缓存，向当前提供商发起实时查询：
+- 确认弹窗默认选中 `Cancel (Default)`，必须手动确认才会消耗重置券。
+- 提交兑换前，扩展会检查当前模型和账号是否发生变动，并核对运行时令牌是否与 Pi 保存的 OAuth 登录信息一致。
+- 在 OpenAI 模式下，重置券作用于服务端定义的账户级窗口，不一定单独清空当前应用的限额。
+- 兑换重置券是本扩展唯一的写操作。
 
-- **底部状态栏**会自动展示当前模型的额度概览（例如 `5h 99% ↻2h13m · 1w 85% ↻3d4h`）。
-- **兑换重置次数**：当检测到 OpenAI 或 Codex 账号下有可用重置票据时，`/usage` 会出现重置选项；确认框默认选中 `Cancel (Default)`，防止误触。
+## 配置
 
----
-
-## 使用与配置
-
-### 切换显示模式（剩余额度 vs 已用额度）
-
-默认显示**剩余额度**百分比。若希望显示**已用额度**，可创建全局配置 `~/.pi/agent/subscription-usage.json`，或在受信任项目中创建 `.pi/subscription-usage.json` 覆盖：
+百分比默认显示剩余额度。如需改为显示已用额度，可在 `~/.pi/agent/subscription-usage.json`（全局）或 `.pi/subscription-usage.json`（受信任项目的局部覆盖）中配置：
 
 ```json
 {
@@ -85,58 +104,35 @@ pi install /absolute/path/to/pi-subscription-usage
 | 配置值 | 说明 |
 | --- | --- |
 | `"remaining"` | 显示剩余额度百分比（默认） |
-| `"used"` | 显示已消耗额度百分比 |
+| `"used"` | 显示已用额度百分比 |
 
-修改后执行 `/reload` 生效。该配置同时作用于底部状态栏、`/usage` 面板以及结构化状态事件。
+修改配置文件后执行 `/reload` 生效。`displayMode` 同时作用于底部状态栏、`/usage` 进度条和状态事件。
 
-### 各平台额度展示说明
+## 隐私与安全
 
-- **OpenAI (ChatGPT)**：将网页端套餐限额（`Plan limits`）与当前应用限额分组展示（`App Allowance` 表示分配给该应用的配额上限比例，而非剩余百分比）。底部状态栏默认展示 `Plan limits`，与 ChatGPT 网页用量页保持一致。
-- **OpenAI Codex**：严格按 `Shared Across Models`（跨模型共享）→ 各模型专属分组 → `Account`（含本地从 OAuth Token 解析出的邮箱）顺序排列，不同域的窗口绝不混排。
-- **xAI Grok**：使用统一的 `5h / 1w / 1m` 格式。每周重置后若 proto3 省略了为 0 的 `creditUsagePercent`，会正确按已用 `0%` 处理；当周额度已可正常展示时，月度探测失败不会中断整体展示。
-- **Antigravity**：自动划分为三个独立额度池：**Gemini Models**（Gemini Flash 与 Pro 的 5 小时与每周限额）、**Claude and GPT models**（Claude Opus/Sonnet 与 GPT-OSS 的 5 小时与每周限额）以及 **Gemini 4 Argon**（Argon 专属每周限额）。底部状态栏按当前模型 id 选择额度池（`claude`、`gpt-oss` 或 `argon`）；无法识别时，若存在 Gemini 池则显示该池。
-
----
-
-## 设计思路与安全边界
-
-### OpenAI / Codex 额度重置安全机制
-
-兑换重置票据是本扩展唯一的写操作。OpenAI 与 Codex 模式均通过 Codex 后端凭据调用与网页端一致的 `/wham/rate-limit-reset-credits` 和 `/consume` 接口，并通过 `chatgpt-account-id` 严格绑定当前令牌所属账户：
-
-1. **只认明确可用的票据**：仅统计和兑换列表中明确存在、可用、当前套餐支持且未过期的 `codex_rate_limits` 票据；若仅有汇总数字或列表查询失败，绝不回退为由服务端盲选兑换。
-2. **兑换前双重核验**：兑换前会再次确认当前激活模型与账号未发生变化，并通过 `readStoredCredential()` 核对运行时令牌与 Pi `/login` 保存的凭据完全一致（OpenAI 模式还会重新核验应用注册匹配）。
-3. **明确作用范围与幂等重试**：OpenAI 模式下，确认弹窗会明确提示票据重置的是服务端定义的账户级窗口（不保证清空当前独立应用窗口）。请求携带唯一 ID 并在重试时复用，兑换成功后自动清空双端缓存。
-
-### 状态事件总线（供其他扩展集成）
-
-除输出无图标的纯文本状态栏（`setStatus`）外，扩展还会发布 `subscription-usage/status/v1` 结构化事件，方便主题或状态栏插件自定义图标、颜色与布局，无需正则解析文本：
-
-- 窗口固定按 `5h` → `1w` → `1m` → `other` 排序。
-- 就绪事件包含 `displayMode`，每个窗口同时提供 `displayPercent`、`remainingPercent`、`usedPercent` 以及预先格式化好的 `resetCountdown`（如 `2h13m`）。
-
-### 安全与稳定性说明
-
-- **仅限官方直连**：仅通过 `ctx.modelRegistry.getProviderAuth()` 解析凭据并发送至官方域名，拒绝任何自定义代理或自定义 Base URL。
-- **严禁跨路径读取**：Grok 仅使用 Pi 的 OAuth 凭据，绝不读取 `~/.grok/auth.json`，也不接受用 API Key 替代订阅登录。
-- **凭据不落盘**：Token 不会写入缓存文件、会话记录、状态栏或报错信息；内存缓存键仅保存进程内 HMAC 指纹。
-- **未公开接口容错**：OpenAI 应用用量、Codex 重置、Grok 账单和 Kimi 用量均依赖各厂商未公开的内部接口。若遇到账号/工作区不匹配或接口变更，插件会直接报告错误，绝不冒用其他账号数据。
-
----
+- 仅从 Pi 自身的登录注册表读取凭据，不读取浏览器 Cookie 或其他工具的凭据文件（例如 Grok 不会读取 `~/.grok/auth.json`）。
+- 仅向各提供商的官方接口发起请求，拒绝自定义代理和自定义 Base URL。
+- 令牌不会写入缓存、会话文件、状态栏或报错信息。
+- 不修改任何模型请求。
+- 部分提供商的用量接口属于未公开接口；若接口变更，扩展会直接报错提示，不会猜测或伪造数据。
 
 ## 本地开发
 
 ```bash
-# 运行测试套件（需支持直接运行 TypeScript 的 Node.js 版本）
+# 运行测试（需要原生支持 TypeScript 的 Node.js 版本）
 npm test
 
-# 检查 npm 打包文件列表
+# 检查打包文件列表
 npm run pack:check
 
-# 免安装直接加载验证
+# 不安装直接加载扩展验证
 pi --no-extensions --offline -e ./index.ts --list-models
 ```
 
+### 主题与状态栏扩展接入
+
+扩展会在 `subscription-usage/status/v1` 事件通道发布结构化状态事件，供自定义主题或状态栏扩展直接渲染额度数据，无需解析状态栏文本。窗口固定按 `5h` -> `1w` -> `1m` -> 其他顺序排列；就绪事件包含 `displayMode`，每个窗口提供 `displayPercent`、`remainingPercent`、`usedPercent` 和 `resetCountdown`。
+
 ## 许可证
 
-采用 [MIT](./LICENSE) 许可证。改编的第三方源码及许可证声明见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
+[MIT](./LICENSE)。改编的第三方源码及许可证信息见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。
