@@ -2,7 +2,7 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-View your active subscription quota directly inside [Pi](https://github.com/earendil-works/pi-mono) — in the footer status bar and via `/usage` — across OpenAI (ChatGPT), OpenAI Codex, OpenCode Go, xAI Grok, and Kimi Coding.
+View your active subscription quota directly inside [Pi](https://github.com/earendil-works/pi-mono) — in the footer status bar and via `/usage` — across OpenAI (ChatGPT), OpenAI Codex, OpenCode Go, xAI Grok, Kimi Coding, and Antigravity.
 
 - **One consistent view** — 5-hour, weekly, and monthly quota windows rendered with uniform progress bars and `MM/DD HH:mm` reset times.
 - **Live footer countdown** — compact status bar summary (e.g. `5h 99% ↻2h13m · 1w 85% ↻3d4h`) that updates automatically after each turn and every 5 minutes.
@@ -22,6 +22,7 @@ View your active subscription quota directly inside [Pi](https://github.com/eare
 | **OpenCode Go** | `opencode` | `5h`, `1w`, `1m` | — |
 | **xAI Grok** | `xai` / `xai-auth` | `1w` and/or `1m` | — |
 | **Kimi Coding** | `kimi` | `5h`, `1w`, membership plan | — |
+| **Antigravity** | `antigravity` | `5h` + `1w` (Gemini), `5h` + `1w` (Claude/GPT), `1w` (Argon) | — |
 
 > ¹ **Why does OpenAI require a one-time `/login openai-codex`?** OpenAI rejects `Sign in with ChatGPT` tokens on its usage and reset endpoints (`HTTP 401`). Run `/login openai-codex` once with the same ChatGPT account/workspace so the extension can query quota, while keeping `openai` as your active model.
 
@@ -91,6 +92,7 @@ Run `/reload` after updating the configuration file. `displayMode` applies to th
 - **OpenAI (ChatGPT)**: Separates website `Plan limits` from the current app's limits (`App Allowance` shows the configured cap share, not remaining quota). Footer status tracks `Plan limits` to match the ChatGPT usage page.
 - **OpenAI Codex**: Groups windows into `Shared Across Models`, model-specific sections, and `Account` (including the local OAuth email when present). Domains are never interleaved.
 - **xAI Grok**: Displays weekly and/or monthly windows in the same `5h / 1w / 1m` format. If `creditUsagePercent` is omitted by proto3 after a weekly reset, it is treated as `0%` used.
+- **Antigravity**: Separates quota into three independent shared pools: **Gemini Models** (5-hour and weekly limits for Gemini Flash and Pro), **Claude and GPT models** (5-hour and weekly limits for Claude Opus/Sonnet and GPT-OSS), and **Gemini 4 Argon** (weekly limit). The footer selects a pool from the active model id (`claude`, `gpt-oss`, or `argon`); an unrecognized model shows the Gemini pool when that pool is present.
 
 ---
 

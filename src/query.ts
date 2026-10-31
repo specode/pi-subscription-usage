@@ -8,7 +8,20 @@ import {
 	isAbortError,
 	redactUsageError,
 } from "./core.ts";
-import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
+import {
+	CODEX_PROVIDER_ID,
+} from "./providers/codex-constants.ts";
+import {
+	ANTIGRAVITY_LOAD_CODE_ASSIST_BODY,
+	ANTIGRAVITY_OFFICIAL_ORIGINS,
+	ANTIGRAVITY_PROVIDER_ID,
+	antigravityQueryOrigins,
+	antigravityRequestHeaders,
+	emailFromAntigravityCredential,
+	extractAntigravityAuth,
+	isRetryableAntigravityError,
+	normalizeAntigravityUsage,
+} from "./providers/antigravity.ts";
 import {
 	codexAccountIdFromAccessToken,
 	normalizeCodexResetCreditsPayload,
@@ -206,7 +219,101 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 			return normalizeGrokBilling(credits, capturedAt, monthly);
 		},
 	},
+	{
+		id: ANTIGRAVITY_PROVIDER_ID,
+		displayName: "Antigravity",
+		providerIds: [ANTIGRAVITY_PROVIDER_ID],
+		officialOrigins: ANTIGRAVITY_OFFICIAL_ORIGINS,
+		semantics: {
+			kind: "consumer-subscription",
+			label: "Antigravity subscription limits",
+		},
+		async query(auth, signal, timeoutMs) {
+			const quota = await fetchAntigravityJson(
+				antigravityQueryOrigins(auth.model?.baseUrl),
+				"/v1internal:retrieveUserQuotaSummary",
+				auth,
+				signal,
+				timeoutMs,
+				"Antigravity quota endpoint",
+				{},
+			);
+			let planPayload: unknown;
+			try {
+				planPayload = await fetchProviderJson(
+					`${quota.origin}/v1internal:loadCodeAssist`,
+					auth,
+					signal,
+					timeoutMs,
+					"Antigravity code assist endpoint",
+					{
+						method: "POST",
+						body: ANTIGRAVITY_LOAD_CODE_ASSIST_BODY,
+						headers: antigravityRequestHeaders(),
+					},
+				);
+			} catch (error) {
+				if (isAbortError(error) || signal.aborted) throw error;
+			}
+
+			return normalizeAntigravityUsage(
+				quota.payload,
+				Date.now(),
+				planPayload,
+				auth.accountEmail,
+			);
+		},
+	},
 ];
+
+async function readAntigravityStoredCredential(): Promise<unknown> {
+	try {
+		const { readStoredCredential } = await import(
+			"@earendil-works/pi-coding-agent",
+		);
+		return readStoredCredential(ANTIGRAVITY_PROVIDER_ID);
+	} catch {
+		return undefined;
+	}
+}
+
+async function fetchAntigravityJson(
+	origins: readonly string[],
+	path: string,
+	auth: ResolvedUsageAuth,
+	signal: AbortSignal,
+	timeoutMs: number,
+	description: string,
+	body: Record<string, unknown>,
+): Promise<{ origin: string; payload: Record<string, unknown> }> {
+	let lastError: unknown;
+	for (const origin of origins) {
+		try {
+			return {
+				origin,
+				payload: await fetchProviderJson(
+					`${origin}${path}`,
+					auth,
+					signal,
+					timeoutMs,
+					description,
+					{
+						method: "POST",
+						body,
+						headers: antigravityRequestHeaders(),
+					},
+				),
+			};
+		} catch (error) {
+			if (isAbortError(error) || signal.aborted) throw error;
+			lastError = error;
+			if (!isRetryableAntigravityError(error)) throw error;
+		}
+	}
+	throw lastError instanceof Error
+		? lastError
+		: new Error(`${description} failed.`);
+}
 
 export function adapterForProvider(
 	providerId: string | undefined,
@@ -265,13 +372,28 @@ export async function resolveUsageAuth(
 			`${adapter.displayName} usage cannot send a proxy-resolved credential to an official usage endpoint.`,
 		);
 	}
-	const authorization =
-		headerValue(result.auth.headers, "Authorization") ??
-		(result.auth.apiKey ? `Bearer ${result.auth.apiKey}` : undefined);
+	let authorization = headerValue(result.auth.headers, "Authorization");
+	let extractedToken: string | undefined;
+	let accountEmail: string | undefined;
+
+	if (adapter.id === ANTIGRAVITY_PROVIDER_ID) {
+		const extracted = extractAntigravityAuth(result.auth.apiKey, authorization);
+		authorization = extracted.authorization;
+		extractedToken = extracted.token;
+		accountEmail =
+			extracted.email ??
+			emailFromAntigravityCredential(
+				await readAntigravityStoredCredential(),
+			);
+	} else if (!authorization && result.auth.apiKey) {
+		authorization = `Bearer ${result.auth.apiKey}`;
+	}
+
 	if (!authorization) return undefined;
 	const headers = { Authorization: authorization };
 	const secrets = [
 		result.auth.apiKey,
+		extractedToken && extractedToken !== result.auth.apiKey ? extractedToken : undefined,
 		headerValue(result.auth.headers, "Authorization"),
 		authorization,
 	].filter((value): value is string => Boolean(value));
@@ -287,6 +409,7 @@ export async function resolveUsageAuth(
 			actualProviderId: model.provider,
 			model,
 			openaiClientId: clientId,
+			accountEmail,
 			// Only the backend credential is sent to ChatGPT. The active API token
 			// is used locally for registration matching and cache invalidation.
 			headers: companion.headers,
@@ -296,6 +419,7 @@ export async function resolveUsageAuth(
 	}
 	return {
 		actualProviderId: model.provider,
+		accountEmail,
 		apiKey: result.auth.apiKey,
 		headers,
 		fingerprint: fingerprintResolvedAuth({ headers }, salt),

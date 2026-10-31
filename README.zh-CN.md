@@ -2,7 +2,7 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
-在 [Pi](https://github.com/earendil-works/pi-mono) 终端底部状态栏与 `/usage` 面板中，统一查看当前订阅账号的实时额度——支持 OpenAI (ChatGPT)、OpenAI Codex、OpenCode Go、xAI Grok 和 Kimi Coding。
+在 [Pi](https://github.com/earendil-works/pi-mono) 终端底部状态栏与 `/usage` 面板中，统一查看当前订阅账号的实时额度——支持 OpenAI (ChatGPT)、OpenAI Codex、OpenCode Go、xAI Grok、Kimi Coding 和 Antigravity。
 
 - **多平台统一视图**：以一致的进度条和 `MM/DD HH:mm` 重置时间展示 5 小时、每周、每月及模型专属额度窗口。
 - **底部栏实时倒计时**：状态栏自动显示紧凑摘要（如 `5h 99% ↻2h13m · 1w 85% ↻3d4h`），每轮对话后及每 5 分钟自动刷新。
@@ -22,6 +22,7 @@
 | **OpenCode Go** | `opencode` | `5h`、`1w`、`1m` | — |
 | **xAI Grok** | `xai` / `xai-auth` | `1w` 和/或 `1m` | — |
 | **Kimi Coding** | `kimi` | `5h`、`1w`、会员套餐等级 | — |
+| **Antigravity** | `antigravity` | `5h` + `1w` (Gemini 系列), `5h` + `1w` (Claude/GPT 系列), `1w` (Argon 系列) | — |
 
 > ¹ **为什么 OpenAI 模式需要执行一次 `/login openai-codex`？** OpenAI 的用量与重置接口会拒绝 `Sign in with ChatGPT` 令牌（返回 `HTTP 401`）。用同一个 ChatGPT 账号/工作区执行一次 `/login openai-codex` 后，插件即可借用该凭据读取用量，日常对话模型仍可保持为 `openai`。
 
@@ -91,6 +92,7 @@ pi install /absolute/path/to/pi-subscription-usage
 - **OpenAI (ChatGPT)**：将网页端套餐限额（`Plan limits`）与当前应用限额分组展示（`App Allowance` 表示分配给该应用的配额上限比例，而非剩余百分比）。底部状态栏默认展示 `Plan limits`，与 ChatGPT 网页用量页保持一致。
 - **OpenAI Codex**：严格按 `Shared Across Models`（跨模型共享）→ 各模型专属分组 → `Account`（含本地从 OAuth Token 解析出的邮箱）顺序排列，不同域的窗口绝不混排。
 - **xAI Grok**：使用统一的 `5h / 1w / 1m` 格式。每周重置后若 proto3 省略了为 0 的 `creditUsagePercent`，会正确按已用 `0%` 处理；当周额度已可正常展示时，月度探测失败不会中断整体展示。
+- **Antigravity**：自动划分为三个独立额度池：**Gemini Models**（Gemini Flash 与 Pro 的 5 小时与每周限额）、**Claude and GPT models**（Claude Opus/Sonnet 与 GPT-OSS 的 5 小时与每周限额）以及 **Gemini 4 Argon**（Argon 专属每周限额）。底部状态栏按当前模型 id 选择额度池（`claude`、`gpt-oss` 或 `argon`）；无法识别时，若存在 Gemini 池则显示该池。
 
 ---
 

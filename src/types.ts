@@ -53,6 +53,7 @@ export interface ResolvedUsageAuth {
 	openaiClientId?: string;
 	/** Original usage identity, retained when reset auth adds account headers. */
 	usageFingerprint?: string;
+	accountEmail?: string;
 	apiKey?: string;
 	headers: Record<string, string>;
 	fingerprint: string;
