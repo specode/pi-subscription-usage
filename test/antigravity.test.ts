@@ -11,7 +11,12 @@ import {
 	extractAntigravityAuth,
 	normalizeAntigravityUsage,
 } from "../src/providers/antigravity.ts";
-import { adapterForProvider, resolveUsageAuth, UsageUnsupportedError } from "../src/query.ts";
+import {
+	adapterForProvider,
+	queryProviderUsage,
+	resolveUsageAuth,
+	UsageUnsupportedError,
+} from "../src/query.ts";
 import { formatUsageStatusline } from "../src/status.ts";
 
 const FIXTURE_QUOTA_SUMMARY = {
@@ -407,12 +412,108 @@ test("Antigravity quota falls back across official origins", async () => {
 			5000,
 		);
 		assert.equal(report.metrics.find((metric) => metric.id === "plan")?.value, "Google AI Pro");
-		assert.deepEqual(calls, [
-			"https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
-			"https://daily-cloudcode-pa.sandbox.googleapis.com/v1internal:retrieveUserQuotaSummary",
-			"https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
-			"https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-		]);
+		// Quota and plan requests run concurrently, each with its own fallback.
+		const ordered = (path: string) => calls.filter((url) => url.endsWith(path));
+		const origins = [
+			"https://daily-cloudcode-pa.googleapis.com",
+			"https://daily-cloudcode-pa.sandbox.googleapis.com",
+			"https://cloudcode-pa.googleapis.com",
+		];
+		assert.deepEqual(
+			ordered("/v1internal:retrieveUserQuotaSummary"),
+			origins.map((origin) => `${origin}/v1internal:retrieveUserQuotaSummary`),
+		);
+		assert.deepEqual(
+			ordered("/v1internal:loadCodeAssist"),
+			origins.map((origin) => `${origin}/v1internal:loadCodeAssist`),
+		);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("Antigravity quota retries the next origin after a network failure", async () => {
+	const adapter = adapterForProvider(ANTIGRAVITY_PROVIDER_ID);
+	assert.ok(adapter);
+	const quotaCalls: string[] = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input) => {
+		const url = String(input);
+		if (url.includes("retrieveUserQuotaSummary")) {
+			quotaCalls.push(url);
+			if (quotaCalls.length === 1) throw new TypeError("fetch failed");
+			return new Response(JSON.stringify(FIXTURE_QUOTA_SUMMARY), { status: 200 });
+		}
+		return new Response(JSON.stringify(FIXTURE_PLAN_PAYLOAD), { status: 200 });
+	};
+	try {
+		const report = await adapter.query(antigravityAuth(), new AbortController().signal, 5000);
+		assert.equal(report.providerId, ANTIGRAVITY_PROVIDER_ID);
+		assert.equal(quotaCalls.length, 2);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("Antigravity free tier is reported as unsupported without retrying", async () => {
+	const adapter = adapterForProvider(ANTIGRAVITY_PROVIDER_ID);
+	assert.ok(adapter);
+	const quotaCalls: string[] = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input) => {
+		const url = String(input);
+		if (url.includes("retrieveUserQuotaSummary")) {
+			quotaCalls.push(url);
+			return new Response(
+				JSON.stringify({
+					error: {
+						code: 403,
+						status: "PERMISSION_DENIED",
+						details: [{ reason: "SUBSCRIPTION_REQUIRED" }],
+					},
+				}),
+				{ status: 403, statusText: "Forbidden" },
+			);
+		}
+		return new Response(JSON.stringify(FIXTURE_PLAN_PAYLOAD), { status: 200 });
+	};
+	try {
+		await assert.rejects(
+			queryProviderUsage(adapter, antigravityAuth(), new AbortController().signal, 5000),
+			(error: Error) => {
+				assert.ok(error instanceof UsageUnsupportedError);
+				assert.match(error.message, /paid Google AI subscription/u);
+				return true;
+			},
+		);
+		assert.equal(quotaCalls.length, 1);
+	} finally {
+		globalThis.fetch = originalFetch;
+	}
+});
+
+test("Antigravity quota still retries a 403 that is not a subscription gate", async () => {
+	const adapter = adapterForProvider(ANTIGRAVITY_PROVIDER_ID);
+	assert.ok(adapter);
+	const quotaCalls: string[] = [];
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async (input) => {
+		const url = String(input);
+		if (url.includes("retrieveUserQuotaSummary")) {
+			quotaCalls.push(url);
+			return new Response("forbidden", { status: 403, statusText: "Forbidden" });
+		}
+		return new Response(JSON.stringify(FIXTURE_PLAN_PAYLOAD), { status: 200 });
+	};
+	try {
+		await assert.rejects(
+			queryProviderUsage(adapter, antigravityAuth(), new AbortController().signal, 5000),
+			(error: Error) => {
+				assert.ok(!(error instanceof UsageUnsupportedError));
+				return true;
+			},
+		);
+		assert.equal(quotaCalls.length, 3);
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
@@ -429,7 +530,10 @@ test("Antigravity quota does not retry an unauthorized token", async () => {
 	};
 	try {
 		await assert.rejects(adapter.query(antigravityAuth(), new AbortController().signal, 5000));
-		assert.equal(calls.length, 1);
+		assert.equal(
+			calls.filter((url) => url.includes("retrieveUserQuotaSummary")).length,
+			1,
+		);
 	} finally {
 		globalThis.fetch = originalFetch;
 	}

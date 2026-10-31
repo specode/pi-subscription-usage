@@ -69,7 +69,10 @@ type StableCurrent = {
 
 export default function subscriptionUsage(pi: ExtensionAPI): void {
 	const cache = new UsageCache(CACHE_TTL_MS);
-	const failureBackoff = new Map<string, { until: number; message: string }>();
+	const failureBackoff = new Map<
+		string,
+		{ until: number; message: string; status: "unsupported" | "query-failed" }
+	>();
 	const activeControllers = new Set<AbortController>();
 	let sessionActive = false;
 	let displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE;
@@ -224,7 +227,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				state: {
 					providerId: adapter.id,
 					providerName: adapter.displayName,
-					status: "query-failed",
+					status: failure.status,
 					message: failure.message,
 				},
 				fingerprint: auth.fingerprint,
@@ -251,15 +254,19 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		} catch (error) {
 			if (isAbortError(error) || !sessionActive) throw error;
 			const message = errorMessage(error);
+			const status = error instanceof UsageUnsupportedError
+				? "unsupported"
+				: "query-failed";
 			failureBackoff.set(failureKey, {
 				until: Date.now() + FAILURE_BACKOFF_MS,
 				message,
+				status,
 			});
 			return {
 				state: {
 					providerId: adapter.id,
 					providerName: adapter.displayName,
-					status: "query-failed",
+					status,
 					message,
 				},
 				fingerprint: auth.fingerprint,

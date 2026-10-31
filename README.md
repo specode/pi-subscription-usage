@@ -22,9 +22,11 @@ View your active subscription quota directly inside [Pi](https://github.com/eare
 | **OpenCode Go** | `opencode` | `5h`, `1w`, `1m` | — |
 | **xAI Grok** | `xai` / `xai-auth` | `1w` and/or `1m` | — |
 | **Kimi Coding** | `kimi` | `5h`, `1w`, membership plan | — |
-| **Antigravity** | `antigravity` | `5h` + `1w` (Gemini), `5h` + `1w` (Claude/GPT), `1w` (Argon) | — |
+| **Antigravity** | `antigravity`² | `5h` + `1w` (Gemini), `5h` + `1w` (Claude/GPT), `1w` (Argon) | — |
 
 > ¹ **Why does OpenAI require a one-time `/login openai-codex`?** OpenAI rejects `Sign in with ChatGPT` tokens on its usage and reset endpoints (`HTTP 401`). Run `/login openai-codex` once with the same ChatGPT account/workspace so the extension can query quota, while keeping `openai` as your active model.
+>
+> ² **Antigravity requires the [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) extension.** Pi has no built-in Antigravity provider; install it with `pi install npm:pi-antigravity`, then run `/login antigravity`. The quota summary requires a paid Google AI subscription; free-tier accounts are shown as unsupported instead of an error.
 
 ---
 

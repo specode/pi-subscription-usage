@@ -8,9 +8,7 @@ import {
 	isAbortError,
 	redactUsageError,
 } from "./core.ts";
-import {
-	CODEX_PROVIDER_ID,
-} from "./providers/codex-constants.ts";
+import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
 import {
 	ANTIGRAVITY_LOAD_CODE_ASSIST_BODY,
 	ANTIGRAVITY_OFFICIAL_ORIGINS,
@@ -19,6 +17,7 @@ import {
 	antigravityRequestHeaders,
 	emailFromAntigravityCredential,
 	extractAntigravityAuth,
+	isAntigravitySubscriptionRequired,
 	isRetryableAntigravityError,
 	normalizeAntigravityUsage,
 } from "./providers/antigravity.ts";
@@ -229,8 +228,23 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 			label: "Antigravity subscription limits",
 		},
 		async query(auth, signal, timeoutMs) {
+			const origins = antigravityQueryOrigins(auth.model?.baseUrl);
+			// Plan metadata is optional; attach the handler now so a quota failure
+			// cannot leave this request as an unhandled rejection.
+			const plan = fetchAntigravityJson(
+				origins,
+				"/v1internal:loadCodeAssist",
+				auth,
+				signal,
+				timeoutMs,
+				"Antigravity code assist endpoint",
+				ANTIGRAVITY_LOAD_CODE_ASSIST_BODY,
+			).then(
+				(result) => result.payload,
+				() => undefined,
+			);
 			const quota = await fetchAntigravityJson(
-				antigravityQueryOrigins(auth.model?.baseUrl),
+				origins,
 				"/v1internal:retrieveUserQuotaSummary",
 				auth,
 				signal,
@@ -238,22 +252,11 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 				"Antigravity quota endpoint",
 				{},
 			);
-			let planPayload: unknown;
-			try {
-				planPayload = await fetchProviderJson(
-					`${quota.origin}/v1internal:loadCodeAssist`,
-					auth,
-					signal,
-					timeoutMs,
-					"Antigravity code assist endpoint",
-					{
-						method: "POST",
-						body: ANTIGRAVITY_LOAD_CODE_ASSIST_BODY,
-						headers: antigravityRequestHeaders(),
-					},
-				);
-			} catch (error) {
-				if (isAbortError(error) || signal.aborted) throw error;
+			const planPayload = await plan;
+			if (signal.aborted) {
+				throw Object.assign(new Error("Usage query aborted."), {
+					name: "AbortError",
+				});
 			}
 
 			return normalizeAntigravityUsage(
@@ -306,6 +309,12 @@ async function fetchAntigravityJson(
 			};
 		} catch (error) {
 			if (isAbortError(error) || signal.aborted) throw error;
+			// Free-tier accounts get this on every origin; it is not a fault.
+			if (isAntigravitySubscriptionRequired(error)) {
+				throw new UsageUnsupportedError(
+					"Antigravity quota summary requires a paid Google AI subscription.",
+				);
+			}
 			lastError = error;
 			if (!isRetryableAntigravityError(error)) throw error;
 		}
@@ -469,7 +478,10 @@ export async function queryProviderUsage(
 		return await adapter.query(auth, signal, timeoutMs);
 	} catch (error) {
 		if (error instanceof Error && error.name === "AbortError") throw error;
-		throw new Error(redactUsageError(errorMessage(error), auth.secrets));
+		const message = redactUsageError(errorMessage(error), auth.secrets);
+		throw error instanceof UsageUnsupportedError
+			? new UsageUnsupportedError(message)
+			: new Error(message);
 	}
 }
 
@@ -516,8 +528,11 @@ export async function fetchProviderJson(
 			description,
 		);
 		if (!response.ok) {
-			throw new Error(
-				`${description} returned ${response.status} ${response.statusText}: ${redactUsageError(text, auth.secrets)}`,
+			throw Object.assign(
+				new Error(
+					`${description} returned ${response.status} ${response.statusText}: ${redactUsageError(text, auth.secrets)}`,
+				),
+				{ status: response.status },
 			);
 		}
 		let parsed: unknown;

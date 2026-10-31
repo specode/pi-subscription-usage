@@ -15,6 +15,7 @@ export const ANTIGRAVITY_ARGON_GROUP_ID = "gemini-argon";
 
 export const ANTIGRAVITY_USER_AGENT =
 	process.env.ANTIGRAVITY_USER_AGENT ||
+	process.env.NOAGY_USER_AGENT ||
 	"antigravity/cli/1.4.0 (aidev_client; os_type=linux; arch=amd64; cl=982146307; auth_method=consumer)";
 
 export const ANTIGRAVITY_LOAD_CODE_ASSIST_BODY = {
@@ -58,10 +59,25 @@ export function antigravityQueryOrigins(baseUrl: string | undefined): string[] {
 	return origins;
 }
 
+/** HTTP failures carry `status`; network failures surface as fetch's TypeError. */
 export function isRetryableAntigravityError(error: unknown): boolean {
-	const message = error instanceof Error ? error.message : "";
-	const status = Number(/ returned (\d{3})\b/u.exec(message)?.[1]);
-	return ANTIGRAVITY_RETRYABLE_STATUSES.has(status);
+	if (error instanceof TypeError) return true;
+	const status = httpStatus(error);
+	return status !== undefined && ANTIGRAVITY_RETRYABLE_STATUSES.has(status);
+}
+
+/** Free-tier accounts cannot read the aggregate quota summary. */
+export function isAntigravitySubscriptionRequired(error: unknown): boolean {
+	return (
+		httpStatus(error) === 403 &&
+		error instanceof Error &&
+		/SUBSCRIPTION_REQUIRED|(?:lack|missing)[^\n]*license/iu.test(error.message)
+	);
+}
+
+function httpStatus(error: unknown): number | undefined {
+	const status = (error as { status?: unknown } | null)?.status;
+	return typeof status === "number" ? status : undefined;
 }
 
 export function extractAntigravityAuth(

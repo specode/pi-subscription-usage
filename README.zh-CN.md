@@ -22,9 +22,11 @@
 | **OpenCode Go** | `opencode` | `5h`、`1w`、`1m` | — |
 | **xAI Grok** | `xai` / `xai-auth` | `1w` 和/或 `1m` | — |
 | **Kimi Coding** | `kimi` | `5h`、`1w`、会员套餐等级 | — |
-| **Antigravity** | `antigravity` | `5h` + `1w` (Gemini 系列), `5h` + `1w` (Claude/GPT 系列), `1w` (Argon 系列) | — |
+| **Antigravity** | `antigravity`² | `5h` + `1w` (Gemini 系列), `5h` + `1w` (Claude/GPT 系列), `1w` (Argon 系列) | — |
 
 > ¹ **为什么 OpenAI 模式需要执行一次 `/login openai-codex`？** OpenAI 的用量与重置接口会拒绝 `Sign in with ChatGPT` 令牌（返回 `HTTP 401`）。用同一个 ChatGPT 账号/工作区执行一次 `/login openai-codex` 后，插件即可借用该凭据读取用量，日常对话模型仍可保持为 `openai`。
+>
+> ² **Antigravity 依赖 [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) 插件。** Pi 没有内置 Antigravity provider，需先执行 `pi install npm:pi-antigravity`，再执行 `/login antigravity`。额度汇总接口需要 Google AI 付费订阅；免费账号会显示为不支持，而不是报错。
 
 ---
 
