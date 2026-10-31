@@ -7,6 +7,7 @@ import {
 	fingerprintResolvedAuth,
 	isAbortError,
 	redactUsageError,
+	sanitizeDisplayText,
 } from "./core.ts";
 import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
 import {
@@ -346,6 +347,18 @@ export async function resolveUsageAuth(
 	const UnsupportedModeError = adapter.id === OPENAI_PROVIDER_ID
 		? UsageUnsupportedError
 		: Error;
+	// Packages that reuse a provider id over another transport (for example
+	// pi-antigravity-bridge's agy-bridge://) are not a proxy to refuse loudly.
+	if (
+		current &&
+		adapter.providerIds.includes(current.provider) &&
+		current.baseUrl &&
+		!isHttpUrl(current.baseUrl)
+	) {
+		throw new UsageUnsupportedError(
+			`${adapter.displayName} usage is unavailable for models served over ${sanitizeDisplayText(current.baseUrl, 60)}; only the provider's own HTTPS API reports quota.`,
+		);
+	}
 	if (
 		current &&
 		adapter.providerIds.includes(current.provider) &&
@@ -624,6 +637,15 @@ function candidateModels(
 	for (const model of ctx.modelRegistry.getAvailable()) add(model);
 	for (const model of ctx.modelRegistry.getAll()) add(model);
 	return candidates;
+}
+
+function isHttpUrl(value: string): boolean {
+	try {
+		const { protocol } = new URL(value);
+		return protocol === "https:" || protocol === "http:";
+	} catch {
+		return false;
+	}
 }
 
 function hasOfficialOrigin(

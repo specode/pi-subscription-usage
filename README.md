@@ -39,7 +39,8 @@ To sign in, run `/login`, pick `Sign in with an account` (Account below) or `Sig
 | OpenCode Go | API key → `OpenCode Go` | `5h`, `1w`, `1m` | — | |
 | xAI Grok | Account → `xAI` | `1w` and/or `1m` | — | |
 | Kimi Coding | Account → `Kimi For Coding` | `5h`, `1w`, membership level | — | |
-| Antigravity | Account → `Antigravity` | Gemini (`5h`, `1w`), Claude and GPT (`5h`, `1w`), Gemini 4 Argon (`1w`), plan, email, project | — | [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) |
+| Antigravity | Account → `Antigravity` | Gemini (`5h`, `1w`), Claude and GPT (`5h`, `1w`), Gemini 4 Argon (`1w`), plan, email, project | — | [`pi-antigravity`](https://www.npmjs.com/package/pi-antigravity) |
+| Claude (Claude Code) | None; signed in through Claude Code | `5h`, `1w` | — | [`pi-claude-bridge`](https://www.npmjs.com/package/pi-claude-bridge) 0.9.3 or later |
 
 ### Provider Notes
 
@@ -53,7 +54,37 @@ Sign in with your SuperGrok account (Account → `xAI`). Signing in with an xAI 
 
 #### Antigravity
 
-Install [`pi-antigravity`](https://github.com/Rahularya01/pi-antigravity) first (`pi install npm:pi-antigravity`). `Antigravity` then appears under `Sign in with an account` in `/login`. Quota is split into three separate shared pools: Gemini models (`5h` and `1w`), Claude and GPT models (`5h` and `1w`), and Gemini 4 Argon (`1w`). The footer shows the pool of the model you are using: Claude and GPT-OSS models show the Claude and GPT pool, Gemini 4 Argon shows the Argon pool, and other Gemini models show the Gemini pool. Quota data requires a paid Google AI subscription; free-tier accounts show `Unsupported` in `/usage` and display nothing in the footer instead of an error.
+Requires [`pi-antigravity`](https://www.npmjs.com/package/pi-antigravity) by Rahul Arya ([GitHub](https://github.com/Rahularya01/pi-antigravity)). Install it with `pi install npm:pi-antigravity`; `Antigravity` then appears under `Sign in with an account` in `/login`. Quota is split into three separate shared pools: Gemini models (`5h` and `1w`), Claude and GPT models (`5h` and `1w`), and Gemini 4 Argon (`1w`). The footer shows the pool of the model you are using: Claude and GPT-OSS models show the Claude and GPT pool, Gemini 4 Argon shows the Argon pool, and other Gemini models show the Gemini pool. Quota data requires a paid Google AI subscription; free-tier accounts show `Unsupported` in `/usage` and display nothing in the footer instead of an error.
+
+Tested with `pi-antigravity` 0.11.0. Every earlier version back to 0.1.0 registers the same provider id, Google endpoint, and credential format, so they are expected to work too.
+
+Several packages have similar names. The extension recognizes the `antigravity` provider id and reads quota from Google's Cloud Code API with the credential Pi resolves for it, so the package must register that id and serve models from Google's endpoint. Install only one package that registers `antigravity`. As of October 31, 2026:
+
+| Package | Result |
+| --- | --- |
+| `pi-antigravity` | Works |
+| `@gwylook/pi-antigravity`, `@dereknex/pi-antigravity` (forks of `pi-antigravity`), `@heyhuynhgiabuu/pi-oauth-antigravity`, `@raquezha/antigravity`, `pi-provider-antigravity` | Same provider id, Google endpoint, and credential format; expected to work, untested |
+| `@estebanforge/pi-antigravity-bridge`, `@thoth-agents/pi-antigravity-bridge` | Register `antigravity` but run models through a local Antigravity bridge (`agy-bridge://`): unsupported, so the footer stays empty and `/usage` explains why |
+| `@cortexkit/pi-antigravity-auth` (`google`), `pi-antigravity-acp-provider` and `@dapidev/pi-antigravity-pure` (`antigravity-acp`), `@ackneal/pi-agy-bridge` (`agy`) | Register a different provider id; not supported |
+
+#### Claude (Claude Code)
+
+Requires [`pi-claude-bridge`](https://www.npmjs.com/package/pi-claude-bridge) by elidickinson ([GitHub](https://github.com/elidickinson/pi-claude-bridge)), version 0.9.3 or later. 0.9.3 is the first version that passes Claude Code's usage reports on to Pi. Install it with `pi install npm:pi-claude-bridge` and sign in to Claude Code itself; there is no Pi login. Usage covers models under the `claude-bridge` provider; Claude models served by Antigravity use the Antigravity pool above.
+
+The bridge has no usage endpoint to query: Claude Code attaches your plan usage to its responses, and the extension reads that report. So the footer stays empty in each new session until the first report arrives, `/usage` shows the last reported values with the time they were reported instead of fetching, and a window whose reset time has passed shows as unused until the next report. The extension never reads Claude Code's credentials.
+
+Tested with `pi-claude-bridge` 0.9.3 and Claude Code 2.1.311, the version bundled with the bridge's Agent SDK. If you point the bridge at your own `claude` executable (`pathToClaudeCodeExecutable`), older Claude Code versions are untested.
+
+Several packages have similar names. The extension recognizes the `claude-bridge` provider id, so the package must both register that id and pass usage reports on. As of October 31, 2026:
+
+| Package | Result |
+| --- | --- |
+| `pi-claude-bridge` 0.9.3 or later | Works |
+| `@viniciosrab/pi-claude-bridge` 0.9.4-fork.3 | Same usage code as 0.9.3; expected to work, untested |
+| `pi-claude-bridge` before 0.9.3, `@fractaal/pi-claude-bridge`, `@yassimba/pi-claude-bridge`, `@agimon-ai/po-claude-bridge` | Register `claude-bridge` but never pass usage on: the footer stays empty and `/usage` keeps showing `Waiting` |
+| `@vanillagreen/pi-claude-bridge`, `pi-claude-subscription`, `pi-claude-directsdk`, `@ramtinj95/pi-claude-delegation` | Register a different provider id; not supported |
+
+The npm package `claude-bridge`, without the `pi-` prefix, is an unrelated proxy server for the Claude Code CLI; `pi install npm:claude-bridge` installs the wrong package. Run `pi list` to check which package you have.
 
 ## Installation
 
@@ -81,6 +112,7 @@ Sign in through `/login` as described above, then select a model from that provi
 
 - The footer status bar shows the active quota windows and refreshes after each turn and every 5 minutes (using a 5-minute cache).
 - Running `/usage` always fetches fresh data for the active provider and shows progress bars, reset times (`MM/DD HH:mm`), and account details.
+- Claude is the exception: its quota is never fetched, only read from Claude Code's responses (see [Claude (Claude Code)](#claude-claude-code)).
 
 ### Reset Credits (OpenAI and Codex)
 
@@ -110,7 +142,7 @@ Run `/reload` after changing the config file. `displayMode` applies to the foote
 
 ## Privacy and Safety
 
-- Credentials come only from Pi's own login (provider registry). The extension never reads browser cookies or other tools' credential files (for example, Grok never reads `~/.grok/auth.json`).
+- Credentials come only from Pi's own login (provider registry). The extension never reads browser cookies or other tools' credential files (for example, Grok never reads `~/.grok/auth.json`, and Claude usage comes from the bridge's responses, not Claude Code's keychain entry).
 - Requests go only to each provider's official endpoints. Custom proxies and custom base URLs are refused.
 - Tokens are never written to caches, session files, the status bar, or error messages.
 - The extension does not modify model requests.

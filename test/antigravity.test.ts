@@ -573,6 +573,36 @@ test("Antigravity adapter rejects invalid origins", async () => {
 	);
 });
 
+// pi-antigravity-bridge registers the same provider id over a local ACP bridge.
+test("Antigravity over a non-HTTP bridge is unsupported, not an auth failure", async () => {
+	const adapter = adapterForProvider(ANTIGRAVITY_PROVIDER_ID);
+	assert.ok(adapter);
+	for (const baseUrl of ["agy-bridge://antigravity", "agy"]) {
+		let authRequested = false;
+		const bridgeContext = {
+			model: { provider: ANTIGRAVITY_PROVIDER_ID, id: "gemini-3.8-flash", baseUrl },
+			modelRegistry: {
+				getAvailable: () => [],
+				getAll: () => [],
+				isUsingOAuth: () => true,
+				getProviderAuth: async () => {
+					authRequested = true;
+					return { auth: { apiKey: "secret", headers: {} } };
+				},
+			},
+		};
+		await assert.rejects(
+			resolveUsageAuth(bridgeContext as any, adapter),
+			(err: Error) => {
+				assert.ok(err instanceof UsageUnsupportedError);
+				assert.match(err.message, /only the provider's own HTTPS API/u);
+				return true;
+			},
+		);
+		assert.equal(authRequested, false, baseUrl);
+	}
+});
+
 test("does not classify a Gemini pool from description text", () => {
 	const report = normalizeAntigravityUsage(
 		{

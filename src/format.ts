@@ -79,6 +79,7 @@ export function formatProviderState(
 	let status = "Query Failed";
 	if (state.status === "auth-unavailable") status = "Auth Unavailable";
 	else if (state.status === "unsupported") status = "Unsupported";
+	else if (state.status === "pending") status = "Waiting";
 	return `${state.providerName}\n  ${status}: ${state.message}`;
 }
 

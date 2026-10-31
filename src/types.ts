@@ -85,6 +85,7 @@ export type ProviderUsageState =
 	| {
 			providerId: string;
 			providerName: string;
-			status: "unsupported" | "auth-unavailable" | "query-failed";
+			/** `pending`: an observed provider has not reported usage yet. */
+			status: "unsupported" | "auth-unavailable" | "query-failed" | "pending";
 			message: string;
 	  };

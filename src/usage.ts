@@ -30,6 +30,11 @@ import {
 	resolveCodexResetAuth,
 } from "./codex-resets.ts";
 import { formatProviderState } from "./format.ts";
+import {
+	CLAUDE_BRIDGE_PROVIDER_ID,
+	normalizeClaudeRateLimitHeaders,
+	settleClaudeReport,
+} from "./providers/claude-bridge.ts";
 import { CODEX_PROVIDER_ID } from "./providers/codex-constants.ts";
 import { OPENAI_PROVIDER_ID } from "./providers/openai.ts";
 import {
@@ -50,6 +55,7 @@ import type {
 	ResolvedUsageAuth,
 	UsageModel,
 	UsageProviderAdapter,
+	UsageReport,
 } from "./types.ts";
 
 const CACHE_TTL_MS = 5 * 60 * 1_000;
@@ -79,6 +85,8 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 	let statusGeneration = 0;
 	let statusController: AbortController | undefined;
 	let statusTimer: ReturnType<typeof setTimeout> | undefined;
+	// Holds no credential, so session_shutdown leaves it; nothing reads it after.
+	let claudeObservation: UsageReport | undefined;
 
 	function emitUsageStatus(event: UsageStatusEvent): void {
 		pi.events.emit(USAGE_STATUS_EVENT, event);
@@ -135,7 +143,10 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		model: UsageModel,
 		schedule: boolean,
 	): void {
-		if (outcome.state.status === "unsupported") {
+		if (
+			outcome.state.status === "unsupported" ||
+			outcome.state.status === "pending"
+		) {
 			clearStatusTimer();
 			safeSetStatus(ctx, undefined);
 			emitUnavailableUsage();
@@ -280,6 +291,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		force: boolean,
 		signal: AbortSignal,
 	): Promise<QueryOutcome> {
+		if (isObservedProvider(model)) return observedClaudeOutcome();
 		const adapter = adapterForProvider(model?.provider);
 		if (!adapter) {
 			return {
@@ -294,6 +306,29 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			};
 		}
 		return queryAdapterState(ctx, adapter, force, signal);
+	}
+
+	/** Claude has no query to force; /usage and refreshes reread the last observation. */
+	function observedClaudeOutcome(): QueryOutcome {
+		const providerName = "Claude (Claude Code)";
+		if (!claudeObservation) {
+			return {
+				state: {
+					providerId: CLAUDE_BRIDGE_PROVIDER_ID,
+					providerName,
+					status: "pending",
+					message: "Claude Code has not reported usage in this session yet. It reports usage with its responses, which requires pi-claude-bridge 0.9.3 or later.",
+				},
+			};
+		}
+		return {
+			state: {
+				providerId: CLAUDE_BRIDGE_PROVIDER_ID,
+				providerName,
+				status: "ready",
+				report: settleClaudeReport(claudeObservation, Date.now()),
+			},
+		};
 	}
 
 	async function outcomeStillCurrent(
@@ -344,7 +379,8 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		model: UsageModel | undefined,
 		force: boolean,
 	): Promise<void> {
-		if (!adapterForProvider(model?.provider) || !model) {
+		const observed = isObservedProvider(model);
+		if ((!observed && !adapterForProvider(model?.provider)) || !model) {
 			clearStatus(ctx);
 			return;
 		}
@@ -360,7 +396,8 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			!controller.signal.aborted &&
 			modelIdentity(ctx.model) === modelIdentity(model);
 		try {
-			safeSetStatus(ctx, "usage …");
+			// An observed provider answers immediately; a placeholder would only flicker.
+			if (!observed) safeSetStatus(ctx, "usage …");
 			const outcome = await queryCurrentState(
 				ctx,
 				model,
@@ -623,6 +660,13 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 	pi.on("agent_settled", (_event, ctx) => {
 		if (ctx.hasUI) startStatusRefresh(ctx, ctx.model, false);
 	});
+	pi.on("after_provider_response", (event, ctx) => {
+		if (!isObservedProvider(ctx.model)) return;
+		const report = normalizeClaudeRateLimitHeaders(event.headers, Date.now());
+		if (!report) return;
+		claudeObservation = report;
+		if (ctx.hasUI && sessionActive) startStatusRefresh(ctx, ctx.model, false);
+	});
 	pi.on("session_shutdown", (_event, ctx) => {
 		sessionActive = false;
 		statusGeneration += 1;
@@ -635,4 +679,8 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		safeSetStatus(ctx, undefined);
 		emitUnavailableUsage();
 	});
+}
+
+function isObservedProvider(model: UsageModel | undefined): boolean {
+	return model?.provider === CLAUDE_BRIDGE_PROVIDER_ID;
 }
