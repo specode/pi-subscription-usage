@@ -39,7 +39,7 @@ OpenAI Codex
 | OpenCode Go | API key → `OpenCode Go` | `5h`、`1w`、`1m` | — | |
 | xAI Grok | Account → `xAI` | `1w` 和/或 `1m` | — | |
 | Kimi Coding | Account → `Kimi For Coding` | `5h`、`1w`、会员等级 | — | |
-| Antigravity | Account → `Antigravity` | Gemini（`5h`、`1w`）、Claude 与 GPT（`5h`、`1w`）、Gemini 4 Argon（`1w`）、套餐、邮箱、项目 | — | [`pi-antigravity`](https://www.npmjs.com/package/pi-antigravity) |
+| Antigravity | Account → `Antigravity` | Gemini（`5h`、`1w`）、Claude 与 GPT（`5h`、`1w`）、Gemini 4 Argon（`1w`）、套餐、邮箱、项目 | — | [`@specode/pi-antigravity`](https://github.com/specode/pi-antigravity) |
 | Claude (Claude Code) | 无需在 Pi 登录，使用 Claude Code 的登录 | `5h`、`1w` | — | [`pi-claude-bridge`](https://www.npmjs.com/package/pi-claude-bridge) 0.9.3 及以上 |
 
 ### 提供商说明
@@ -54,15 +54,14 @@ OpenAI Codex
 
 #### Antigravity
 
-需要 Rahul Arya 发布的 [`pi-antigravity`](https://www.npmjs.com/package/pi-antigravity)（[GitHub](https://github.com/Rahularya01/pi-antigravity)）。用 `pi install npm:pi-antigravity` 安装，之后 `/login` 的 `Sign in with an account` 列表里才会出现 `Antigravity`。额度分为三个独立的共享池：Gemini 模型（`5h` 与 `1w`）、Claude 与 GPT 模型（`5h` 与 `1w`）、Gemini 4 Argon（`1w`）。底部状态栏显示当前所用模型对应的额度池：用 Claude 或 GPT-OSS 模型时显示 Claude 与 GPT 池，用 Gemini 4 Argon 时显示 Argon 池，其他 Gemini 模型显示 Gemini 池。额度数据只对 Google AI 付费订阅开放；免费账号在 `/usage` 里显示 `Unsupported`，底部状态栏不显示内容，不会报错。
+需要 [`@specode/pi-antigravity`](https://github.com/specode/pi-antigravity)（[npm](https://www.npmjs.com/package/@specode/pi-antigravity)）。用 `pi install npm:@specode/pi-antigravity` 安装，之后 `/login` 的 `Sign in with an account` 列表里才会出现 `Antigravity`。额度分为三个独立的共享池：Gemini 模型（`5h` 与 `1w`）、Claude 与 GPT 模型（`5h` 与 `1w`）、Gemini 4 Argon（`1w`）。底部状态栏显示当前所用模型对应的额度池：用 Claude 或 GPT-OSS 模型时显示 Claude 与 GPT 池，用 Gemini 4 Argon 时显示 Argon 池，其他 Gemini 模型显示 Gemini 池。额度数据只对 Google AI 付费订阅开放；免费账号在 `/usage` 里显示 `Unsupported`，底部状态栏不显示内容，不会报错。
 
-已用 `pi-antigravity` 0.11.0 测试。0.1.0 以来的各个版本注册的 provider id、Google 接口地址和凭据格式都相同，预计同样可用。
-
-npm 上有好几个名字相近的包。扩展按 `antigravity` 这个 provider id 识别，并用 Pi 为它提供的凭据向 Google 的 Cloud Code 接口查询额度，所以所用的包既要注册这个 id，模型也要走 Google 的接口。注册 `antigravity` 的包只装一个。截至 2026 年 10 月 31 日：
+npm 上有好几个名字相近的包。扩展按 `antigravity` 这个 provider id 识别，并用 Pi 为它提供的凭据向 Google 的 Cloud Code 接口查询额度，所以所用的包既要注册这个 id，模型也要走 Google 的接口。注册 `antigravity` 的包只装一个：
 
 | 包 | 结果 |
 | --- | --- |
-| `pi-antigravity` | 可用 |
+| [`@specode/pi-antigravity`](https://github.com/specode/pi-antigravity) | 推荐 |
+| `pi-antigravity`（0.1.0–0.11.0） | 可用 |
 | `@gwylook/pi-antigravity`、`@dereknex/pi-antigravity`（`pi-antigravity` 的 fork）、`@heyhuynhgiabuu/pi-oauth-antigravity`、`@raquezha/antigravity`、`pi-provider-antigravity` | provider id、Google 接口地址和凭据格式都相同，预计可用，未测试 |
 | `@estebanforge/pi-antigravity-bridge`、`@thoth-agents/pi-antigravity-bridge` | 注册了 `antigravity`，但模型经由本地 Antigravity 桥（`agy-bridge://`）运行：不支持，底部状态栏为空，`/usage` 会说明原因 |
 | `@cortexkit/pi-antigravity-auth`（`google`）、`pi-antigravity-acp-provider` 与 `@dapidev/pi-antigravity-pure`（`antigravity-acp`）、`@ackneal/pi-agy-bridge`（`agy`） | 注册的是别的 provider id，不支持 |
