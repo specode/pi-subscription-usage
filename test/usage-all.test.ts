@@ -43,14 +43,22 @@ const SECOND_USAGE = {
 
 async function startExtension(options: {
 	showAllProviders?: boolean;
+	showAllProvidersCacheMinutes?: number;
 	models?: object[];
 }) {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-usage-all-"));
 	process.env.PI_TEST_AGENT_DIR = agentDir;
+	const config: Record<string, unknown> = {};
 	if (options.showAllProviders !== undefined) {
+		config.showAllProviders = options.showAllProviders;
+	}
+	if (options.showAllProvidersCacheMinutes !== undefined) {
+		config.showAllProvidersCacheMinutes = options.showAllProvidersCacheMinutes;
+	}
+	if (Object.keys(config).length > 0) {
 		writeFileSync(
 			join(agentDir, "subscription-usage.json"),
-			JSON.stringify({ showAllProviders: options.showAllProviders }),
+			JSON.stringify(config),
 		);
 	}
 	const { default: extension } = await import("../src/usage.ts");
@@ -184,6 +192,27 @@ test("/usage reuses the cache for providers other than the active one", async ()
 		assert.equal(calls("opencode.ai"), 1);
 		// The active provider is always fresh.
 		assert.equal(calls("api.kimi.com") - activeCalls, 1);
+	} finally {
+		fetchStub.restore();
+		await harness.cleanup();
+	}
+});
+
+test("showAllProvidersCacheMinutes 0 refetches the other providers every time", async () => {
+	const harness = await startExtension({
+		showAllProviders: true,
+		showAllProvidersCacheMinutes: 0,
+		models: [ACTIVE_MODEL, SECOND_MODEL],
+	});
+	const fetchStub = installFetch();
+	try {
+		await harness.emit("session_start");
+		const calls = (host: string) =>
+			fetchStub.calls.filter((url) => url.includes(host)).length;
+		await harness.usage();
+		assert.equal(calls("opencode.ai"), 1);
+		await harness.usage();
+		assert.equal(calls("opencode.ai"), 2);
 	} finally {
 		fetchStub.restore();
 		await harness.cleanup();

@@ -132,16 +132,18 @@ OpenAI 或 Codex 账号里有可用的限额重置券时，`/usage` 会提供使
 | `displayMode` | `"remaining"`（默认）或 `"used"` | 百分比显示剩余额度还是已用额度，作用于底部状态栏、`/usage` 进度条和状态事件 |
 | `showAllProviders` | `true` 或 `false`（默认） | `/usage` 列出所有已登录的提供商，而不只是当前提供商 |
 | `offerResetCredits` | `true`（默认）或 `false` | 当前 OpenAI 或 Codex 账号有重置券时，`/usage` 是否询问是否使用一张 |
+| `showAllProvidersCacheMinutes` | 默认 `5` | `/usage` 列表里其他提供商的报告复用多久；`0` 表示每次都重新查询 |
 
 ```json
 {
   "displayMode": "used",
   "showAllProviders": true,
-  "offerResetCredits": false
+  "offerResetCredits": false,
+  "showAllProvidersCacheMinutes": 10
 }
 ```
 
-开启 `showAllProviders` 后，当前提供商排在最前并总是重新查询；其余提供商使用同样的五分钟缓存，Pi 没有其凭据的提供商会直接略过。Claude 在 Claude Code 于本次会话中上报用量之前显示为 `Waiting`。底部状态栏仍然只跟踪当前提供商。
+开启 `showAllProviders` 后，当前提供商排在最前并总是重新查询；其余提供商的报告按 `showAllProvidersCacheMinutes` 分钟复用，Pi 没有其凭据的提供商会直接略过。底部状态栏仍按自己的五分钟节奏刷新。Claude 在 Claude Code 于本次会话中上报用量之前显示为 `Waiting`。底部状态栏仍然只跟踪当前提供商。
 
 `offerResetCredits` 设为 `false` 时，`/usage` 仍会显示账号上有几张重置券，但不再询问是否使用；需要使用重置券时把该配置改回 `true`。
 

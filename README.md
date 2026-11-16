@@ -132,16 +132,18 @@ Create `~/.pi/agent/subscription-usage.json` (global) or `.pi/subscription-usage
 | `displayMode` | `"remaining"` (default) or `"used"` | Whether percentages show remaining or used quota, in the footer, `/usage` progress bars and status events |
 | `showAllProviders` | `true` or `false` (default) | `/usage` lists every signed-in provider instead of the active one |
 | `offerResetCredits` | `true` (default) or `false` | Whether `/usage` offers to redeem a reset credit when the active OpenAI or Codex account has one |
+| `showAllProvidersCacheMinutes` | `5` (default) | How long `/usage` reuses a provider's report in the all-providers list; `0` fetches every time |
 
 ```json
 {
   "displayMode": "used",
   "showAllProviders": true,
-  "offerResetCredits": false
+  "offerResetCredits": false,
+  "showAllProvidersCacheMinutes": 10
 }
 ```
 
-With `showAllProviders`, the active provider stays first and is always fetched fresh; the others read the same five-minute cache and are left out when Pi holds no credential for them. Claude appears as `Waiting` until Claude Code reports usage in the session. The footer keeps tracking the active provider.
+With `showAllProviders`, the active provider stays first and is always fetched fresh; the others reuse a report for `showAllProvidersCacheMinutes` minutes and are left out when Pi holds no credential for them. Claude appears as `Waiting` until Claude Code reports usage in the session. The footer keeps tracking the active provider on its own five-minute refresh.
 
 With `offerResetCredits` set to `false`, `/usage` still shows how many reset credits the account has, but never asks whether to redeem one; redeeming then needs the setting turned back on.
 

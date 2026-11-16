@@ -7,7 +7,7 @@ export class UsageCache {
 		string,
 		{ createdAt: number; report: UsageReport }
 	>();
-	private readonly ttlMs: number;
+	private ttlMs: number;
 	private readonly maxEntries: number;
 
 	constructor(ttlMs: number, maxEntries = 32) {
@@ -21,13 +21,24 @@ export class UsageCache {
 		this.maxEntries = maxEntries;
 	}
 
+	/** `maxAgeMs` lets one caller accept a staler report than the default window. */
 	get(
 		providerId: string,
 		fingerprint: string,
 		now = Date.now(),
+		maxAgeMs = this.ttlMs,
 	): UsageReport | undefined {
 		this.sweepExpired(now);
-		return this.entries.get(cacheKey(providerId, fingerprint))?.report;
+		// A zero window means "fetch every time", not "accept a same-millisecond hit".
+		if (maxAgeMs <= 0) return undefined;
+		const entry = this.entries.get(cacheKey(providerId, fingerprint));
+		if (!entry) return undefined;
+		return now - entry.createdAt <= maxAgeMs ? entry.report : undefined;
+	}
+
+	/** A caller that accepts staler reports keeps entries that long before sweeping. */
+	raiseTtl(ttlMs: number): void {
+		if (Number.isFinite(ttlMs) && ttlMs > this.ttlMs) this.ttlMs = ttlMs;
 	}
 
 	set(

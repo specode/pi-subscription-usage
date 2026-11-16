@@ -5,6 +5,7 @@ import type {
 	ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { loadUsageConfig } from "./config.ts";
+import { DEFAULT_USAGE_CONFIG } from "./config-core.ts";
 import {
 	awaitWithDeadline,
 	errorMessage,
@@ -85,6 +86,8 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 	let displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE;
 	let showAllProviders = false;
 	let offerResetCredits = true;
+	let showAllProvidersCacheMs =
+		DEFAULT_USAGE_CONFIG.showAllProvidersCacheMinutes * 60_000;
 	let statusGeneration = 0;
 	let statusController: AbortController | undefined;
 	let statusTimer: ReturnType<typeof setTimeout> | undefined;
@@ -191,6 +194,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		adapter: UsageProviderAdapter,
 		force: boolean,
 		signal: AbortSignal,
+		maxAgeMs?: number,
 	): Promise<QueryOutcome | undefined> {
 		let auth: ResolvedUsageAuth | undefined;
 		try {
@@ -214,7 +218,9 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 			};
 		}
 		if (!auth) return undefined;
-		const cached = force ? undefined : cache.get(adapter.id, auth.fingerprint);
+		const cached = force
+			? undefined
+			: cache.get(adapter.id, auth.fingerprint, Date.now(), maxAgeMs);
 		if (cached) {
 			return {
 				state: {
@@ -596,7 +602,15 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				(adapter) => adapter.id !== active.providerId,
 			).map(async (adapter) => {
 				try {
-					return (await queryAdapterState(ctx, adapter, false, signal))?.state;
+					return (
+						await queryAdapterState(
+							ctx,
+							adapter,
+							false,
+							signal,
+							showAllProvidersCacheMs,
+						)
+					)?.state;
 				} catch (error) {
 					if (isAbortError(error) || !sessionActive) throw error;
 					return {
@@ -709,6 +723,8 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		displayMode = config.displayMode;
 		showAllProviders = config.showAllProviders;
 		offerResetCredits = config.offerResetCredits;
+		showAllProvidersCacheMs = config.showAllProvidersCacheMinutes * 60_000;
+		cache.raiseTtl(showAllProvidersCacheMs);
 		for (const warning of config.warnings) {
 			ctx.ui.notify(`Usage config ignored: ${warning}`, "warning");
 		}
