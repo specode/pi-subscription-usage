@@ -103,7 +103,7 @@ function formatBucket(
 			bucket.limit !== 100 && // x/100 duplicates the percent exactly
 			selectedAmount !== undefined
 		) {
-			return `${bar}  ${percent} ${qualifier} · ${formatNumber(selectedAmount)}/${formatNumber(bucket.limit)}${reset}`;
+			return `${bar}  ${percent} ${qualifier} · ${formatValue(selectedAmount, bucket.unit)}/${formatValue(bucket.limit, bucket.unit)}${reset}`;
 		}
 		return `${bar}  ${percent} ${qualifier}${reset}`;
 	}

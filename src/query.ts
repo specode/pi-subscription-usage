@@ -39,6 +39,14 @@ import {
 } from "./providers/grok.ts";
 import { normalizeKimiUsage } from "./providers/kimi.ts";
 import {
+	MISTRAL_BUDGET_URL,
+	MISTRAL_LEGACY_PROVIDER_ID,
+	MISTRAL_OFFICIAL_ORIGINS,
+	MISTRAL_PROVIDER_ID,
+	MISTRAL_SUBSCRIPTION_URL,
+	normalizeMistralUsage,
+} from "./providers/mistral.ts";
+import {
 	OPENAI_PROVIDER_ID,
 	normalizeOpenAIPlanUsage,
 	openaiClientIdFromAuthorization,
@@ -167,6 +175,56 @@ export const SUPPORTED_ADAPTERS: readonly UsageProviderAdapter[] = [
 				),
 				Date.now(),
 			);
+		},
+	},
+	{
+		id: MISTRAL_PROVIDER_ID,
+		displayName: "Mistral",
+		providerIds: [MISTRAL_PROVIDER_ID, MISTRAL_LEGACY_PROVIDER_ID],
+		officialOrigins: [...MISTRAL_OFFICIAL_ORIGINS],
+		semantics: {
+			kind: "consumer-subscription",
+			label: "Mistral subscription budget",
+		},
+		async query(auth, signal, timeoutMs) {
+			// The plan is decoration; attach the handler now so a budget failure
+			// cannot leave this request as an unhandled rejection.
+			const subscription = fetchProviderJson(
+				MISTRAL_SUBSCRIPTION_URL,
+				auth,
+				signal,
+				timeoutMs,
+				"Mistral subscription endpoint",
+			).then(
+				(payload) => payload,
+				() => undefined,
+			);
+			let budget: Record<string, unknown>;
+			try {
+				budget = await fetchProviderJson(
+					MISTRAL_BUDGET_URL,
+					auth,
+					signal,
+					timeoutMs,
+					"Mistral budget endpoint",
+				);
+			} catch (error) {
+				if (isAbortError(error) || signal.aborted) throw error;
+				const status = httpStatus(error);
+				if (status === 403) {
+					throw new UsageUnsupportedError(
+						"Mistral did not grant this key the see_org_inference_usage permission, so the monthly budget cannot be read.",
+					);
+				}
+				if (status === 404) {
+					throw new UsageUnsupportedError(
+						"This Mistral platform does not serve the billing endpoints.",
+					);
+				}
+				throw error;
+			}
+			const planPayload = await subscription;
+			return normalizeMistralUsage(budget, Date.now(), planPayload);
 		},
 	},
 	{
@@ -323,6 +381,12 @@ async function fetchAntigravityJson(
 	throw lastError instanceof Error
 		? lastError
 		: new Error(`${description} failed.`);
+}
+
+/** HTTP failures carry `status`; network failures surface as fetch's TypeError. */
+function httpStatus(error: unknown): number | undefined {
+	const status = (error as { status?: unknown } | null)?.status;
+	return typeof status === "number" ? status : undefined;
 }
 
 export function adapterForProvider(

@@ -1,7 +1,7 @@
 {
   "name": "@specode/pi-subscription-usage",
   "version": "1.5.0",
-  "description": "Show subscription quota for OpenAI, Codex, OpenCode Go, Grok, Kimi, Antigravity, and Claude (via pi-claude-bridge), plus OpenAI and Codex account reset credits in Pi",
+  "description": "Show subscription quota for OpenAI, Codex, OpenCode Go, Grok, Kimi, Antigravity, Mistral, and Claude (via pi-claude-bridge), plus OpenAI and Codex account reset credits in Pi",
   "type": "module",
   "license": "MIT",
   "author": "Specode",
@@ -24,6 +24,7 @@
     "grok",
     "kimi",
     "antigravity",
+    "mistral",
     "claude"
   ],
   "files": [
