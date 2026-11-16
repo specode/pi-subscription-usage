@@ -152,8 +152,23 @@ registerHooks({ resolve(specifier, context, next) {
 		? { url: sdkUrl, shortCircuit: true } : next(specifier, context);
 } });
 
+/**
+ * The extension settles windows whose reset has passed, so the running-clock test
+ * needs resets ahead of now; the fixed timestamps above are for pure normalization.
+ */
+function bridgeHeadersFromNow() {
+	const nowSeconds = Math.floor(Date.now() / 1_000);
+	return {
+		...bridgeHeaders,
+		"anthropic-ratelimit-unified-reset": String(nowSeconds + 7_200),
+		"anthropic-ratelimit-unified-5h-reset": String(nowSeconds + 7_200),
+		"anthropic-ratelimit-unified-7d-reset": String(nowSeconds + 259_200),
+	};
+}
+
 test("extension shows observed Claude usage without any request", async () => {
 	const { default: extension } = await import("../src/usage.ts");
+	const liveHeaders = bridgeHeadersFromNow();
 	const handlers = new Map<string, Function>();
 	const commands = new Map<string, { handler: Function }>();
 	extension({
@@ -182,10 +197,10 @@ test("extension shows observed Claude usage without any request", async () => {
 		assert.match(await usage() ?? "", /Waiting: /);
 		assert.equal(statuses.at(-1), undefined);
 
-		await emit("after_provider_response", { status: 200, headers: { ...bridgeHeaders, "content-type": "text/event-stream" } });
+		await emit("after_provider_response", { status: 200, headers: { ...liveHeaders, "content-type": "text/event-stream" } });
 		assert.match(await usage() ?? "", /Waiting: /);
 
-		await emit("after_provider_response", { status: 200, headers: bridgeHeaders });
+		await emit("after_provider_response", { status: 200, headers: liveHeaders });
 		assert.match(statuses.at(-1) ?? "", /^5h 80% .* 1w 87% /);
 		assert.ok(!statuses.includes("usage …"));
 
@@ -193,7 +208,7 @@ test("extension shows observed Claude usage without any request", async () => {
 		ctx.model = { provider: "unknown-provider", id: "other" };
 		await emit("model_select", { model: ctx.model });
 		assert.equal(statuses.at(-1), undefined);
-		await emit("after_provider_response", { status: 200, headers: { ...bridgeHeaders, "anthropic-ratelimit-unified-5h-utilization": "0.9" } });
+		await emit("after_provider_response", { status: 200, headers: { ...liveHeaders, "anthropic-ratelimit-unified-5h-utilization": "0.9" } });
 		ctx.model = model;
 		await emit("model_select", { model: ctx.model });
 		assert.match(statuses.at(-1) ?? "", /^5h 80% /);
