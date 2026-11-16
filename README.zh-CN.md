@@ -110,7 +110,7 @@ pi install /path/to/pi-subscription-usage
 按上面的方法登录，再选一个该提供商的模型，之后：
 
 - 底部状态栏会自动显示当前额度窗口，在每轮对话结束后及每 5 分钟刷新一次（带 5 分钟缓存）。
-- 执行 `/usage` 会跳过缓存直接拉取最新数据，显示进度条、重置时间（`MM/DD HH:mm`）及账号信息。
+- 执行 `/usage` 会跳过缓存直接拉取最新数据，显示进度条、重置时间（`MM/DD HH:mm`）及账号信息。开启 [`showAllProviders`](#配置) 后，还会一并列出其他已登录的提供商。
 - Claude 例外：不会主动查询额度，只读取 Claude Code 回复中附带的数据（见 [Claude (Claude Code)](#claude-claude-code)）。
 
 ### 使用重置券（OpenAI 与 Codex）
@@ -121,23 +121,31 @@ OpenAI 或 Codex 账号里有可用的限额重置券时，`/usage` 会提供使
 - 提交兑换前，扩展会检查当前模型和账号是否发生变动，并核对运行时令牌是否与 Pi 保存的 OAuth 登录信息一致。
 - 在 OpenAI 模式下，重置券作用于服务端定义的账户级窗口，不一定单独清空当前应用的限额。
 - 兑换重置券是本扩展唯一的写操作。
+- 把 [`offerResetCredits`](#配置) 设为 `false` 可以关掉这个询问；账号上的重置券数量仍会显示。
 
 ## 配置
 
-百分比默认显示剩余额度。如需改为显示已用额度，可在 `~/.pi/agent/subscription-usage.json`（全局）或 `.pi/subscription-usage.json`（受信任项目的局部覆盖）中配置：
+配置文件为 `~/.pi/agent/subscription-usage.json`（全局）或 `.pi/subscription-usage.json`（受信任项目的局部覆盖），修改后执行 `/reload` 生效。
+
+| 配置项 | 取值 | 说明 |
+| --- | --- | --- |
+| `displayMode` | `"remaining"`（默认）或 `"used"` | 百分比显示剩余额度还是已用额度，作用于底部状态栏、`/usage` 进度条和状态事件 |
+| `showAllProviders` | `true` 或 `false`（默认） | `/usage` 列出所有已登录的提供商，而不只是当前提供商 |
+| `offerResetCredits` | `true`（默认）或 `false` | 当前 OpenAI 或 Codex 账号有重置券时，`/usage` 是否询问是否使用一张 |
+| `showAllProvidersCacheMinutes` | 默认 `5` | `/usage` 列表里其他提供商的报告复用多久；`0` 表示每次都重新查询 |
 
 ```json
 {
-  "displayMode": "used"
+  "displayMode": "used",
+  "showAllProviders": true,
+  "offerResetCredits": false,
+  "showAllProvidersCacheMinutes": 10
 }
 ```
 
-| 配置值 | 说明 |
-| --- | --- |
-| `"remaining"` | 显示剩余额度百分比（默认） |
-| `"used"` | 显示已用额度百分比 |
+开启 `showAllProviders` 后，当前提供商排在最前并总是重新查询；其余提供商的报告按 `showAllProvidersCacheMinutes` 分钟复用，Pi 没有其凭据的提供商会直接略过。底部状态栏仍按自己的五分钟节奏刷新。Claude 在 Claude Code 于本次会话中上报用量之前显示为 `Waiting`。底部状态栏仍然只跟踪当前提供商。
 
-修改配置文件后执行 `/reload` 生效。`displayMode` 同时作用于底部状态栏、`/usage` 进度条和状态事件。
+`offerResetCredits` 设为 `false` 时，`/usage` 仍会显示账号上有几张重置券，但不再询问是否使用；需要使用重置券时把该配置改回 `true`。
 
 ## 隐私与安全
 

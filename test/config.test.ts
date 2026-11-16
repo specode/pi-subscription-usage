@@ -8,6 +8,9 @@ import {
 
 test("uses remaining as the default display mode", () => {
 	assert.equal(DEFAULT_USAGE_CONFIG.displayMode, "remaining");
+	assert.equal(DEFAULT_USAGE_CONFIG.showAllProviders, false);
+	assert.equal(DEFAULT_USAGE_CONFIG.offerResetCredits, true);
+	assert.equal(DEFAULT_USAGE_CONFIG.showAllProvidersCacheMinutes, 5);
 	assert.deepEqual(parseUsageConfig({}), {});
 });
 
@@ -17,11 +20,21 @@ test("lets project configuration override global display mode", () => {
 			parseUsageConfig({ displayMode: "used" }),
 			parseUsageConfig({ displayMode: "remaining" }),
 		),
-		{ displayMode: "remaining" },
+		{
+			displayMode: "remaining",
+			showAllProviders: false,
+			offerResetCredits: true,
+			showAllProvidersCacheMinutes: 5,
+		},
 	);
 	assert.deepEqual(
 		resolveUsageConfig(parseUsageConfig({ displayMode: "used" })),
-		{ displayMode: "used" },
+		{
+			displayMode: "used",
+			showAllProviders: false,
+			offerResetCredits: true,
+			showAllProvidersCacheMinutes: 5,
+		},
 	);
 });
 
@@ -34,10 +47,80 @@ test("accepts remaining and used display modes", () => {
 	});
 });
 
+test("shows only the active provider unless showAllProviders is on", () => {
+	assert.equal(resolveUsageConfig().showAllProviders, false);
+	assert.equal(
+		resolveUsageConfig(parseUsageConfig({ showAllProviders: true }))
+			.showAllProviders,
+		true,
+	);
+	assert.equal(
+		resolveUsageConfig(
+			parseUsageConfig({ showAllProviders: true }),
+			parseUsageConfig({ showAllProviders: false }),
+		).showAllProviders,
+		false,
+	);
+	assert.deepEqual(parseUsageConfig({ showAllProviders: true }), {
+		showAllProviders: true,
+	});
+});
+
 test("rejects invalid usage configuration", () => {
 	assert.match(parseUsageConfig([]).warning ?? "", /JSON object/u);
 	assert.match(
 		parseUsageConfig({ displayMode: "total" }).warning ?? "",
 		/displayMode/u,
 	);
+	assert.match(
+		parseUsageConfig({ showAllProviders: "yes" }).warning ?? "",
+		/showAllProviders must be true or false/u,
+	);
+	assert.match(
+		parseUsageConfig({ offerResetCredits: "no" }).warning ?? "",
+		/offerResetCredits must be true or false/u,
+	);
+	assert.match(
+		parseUsageConfig({ showAllProvidersCacheMinutes: "5" }).warning ?? "",
+		/showAllProvidersCacheMinutes must be 0 or more/u,
+	);
+	assert.match(
+		parseUsageConfig({ showAllProvidersCacheMinutes: -1 }).warning ?? "",
+		/showAllProvidersCacheMinutes must be 0 or more/u,
+	);
+});
+
+test("offers reset credits unless offerResetCredits is off", () => {
+	assert.equal(resolveUsageConfig().offerResetCredits, true);
+	assert.equal(
+		resolveUsageConfig(parseUsageConfig({ offerResetCredits: false }))
+			.offerResetCredits,
+		false,
+	);
+	assert.equal(
+		resolveUsageConfig(
+			parseUsageConfig({ offerResetCredits: false }),
+			parseUsageConfig({ offerResetCredits: true }),
+		).offerResetCredits,
+		true,
+	);
+});
+
+test("accepts a cache window for the other providers", () => {
+	assert.equal(resolveUsageConfig().showAllProvidersCacheMinutes, 5);
+	assert.equal(
+		resolveUsageConfig(parseUsageConfig({ showAllProvidersCacheMinutes: 0 }))
+			.showAllProvidersCacheMinutes,
+		0,
+	);
+	assert.equal(
+		resolveUsageConfig(
+			parseUsageConfig({ showAllProvidersCacheMinutes: 30 }),
+			parseUsageConfig({ showAllProvidersCacheMinutes: 1 }),
+		).showAllProvidersCacheMinutes,
+		1,
+	);
+	assert.deepEqual(parseUsageConfig({ showAllProvidersCacheMinutes: 2.5 }), {
+		showAllProvidersCacheMinutes: 2.5,
+	});
 });
