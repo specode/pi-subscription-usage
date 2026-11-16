@@ -40,6 +40,7 @@ To sign in, run `/login`, pick `Sign in with an account` (Account below) or `Sig
 | xAI Grok | Account → `xAI` | `1w` and/or `1m` | — | |
 | Kimi Coding | Account → `Kimi For Coding` | `5h`, `1w`, membership level | — | |
 | Antigravity | Account → `Antigravity` | Gemini (`5h`, `1w`), Claude and GPT (`5h`, `1w`), Gemini 4 Argon (`1w`), plan, email, project | — | [`@specode/pi-antigravity`](https://github.com/specode/pi-antigravity) |
+| Mistral | Account → `Mistral` | `1m` Vibe Code and API budgets in dollars, plan, pay-as-you-go | — | [`pi-mistral-subscription`](https://github.com/5omeOtherGuy/pi-mistral-subscription) |
 | Claude (Claude Code) | None; signed in through Claude Code | `5h`, `1w` | — | [`pi-claude-bridge`](https://www.npmjs.com/package/pi-claude-bridge) 0.9.3 or later |
 
 ### Provider Notes
@@ -65,6 +66,12 @@ Several packages have similar names. The extension recognizes the `antigravity` 
 | `@gwylook/pi-antigravity`, `@dereknex/pi-antigravity` (forks of `pi-antigravity`), `@heyhuynhgiabuu/pi-oauth-antigravity`, `@raquezha/antigravity`, `pi-provider-antigravity` | Same provider id, Google endpoint, and credential format; expected to work, untested |
 | `@estebanforge/pi-antigravity-bridge`, `@thoth-agents/pi-antigravity-bridge` | Register `antigravity` but run models through a local Antigravity bridge (`agy-bridge://`): unsupported, so the footer stays empty and `/usage` explains why |
 | `@cortexkit/pi-antigravity-auth` (`google`), `pi-antigravity-acp-provider` and `@dapidev/pi-antigravity-pure` (`antigravity-acp`), `@ackneal/pi-agy-bridge` (`agy`) | Register a different provider id; not supported |
+
+#### Mistral
+
+Requires [`pi-mistral-subscription`](https://github.com/5omeOtherGuy/pi-mistral-subscription) ([npm](https://www.npmjs.com/package/pi-mistral-subscription)). Install it with `pi install npm:pi-mistral-subscription`; `Mistral` then appears under `Sign in with an account` in `/login`. The extension recognizes the `mistral` provider id that 0.2.0 registers, and the deprecated `mistral-subscription` id of the releases before it.
+
+A Mistral plan is a monthly budget shared by Studio, the API and Vibe Code, not a window of requests, so `/usage` shows the allowance in dollars next to the percentage: the Vibe Code budget, the API budget, the plan, and whether pay-as-you-go is on. The footer tracks the Vibe Code budget, which is where subscription sign-in requests are counted. Usage comes from `GET /v1/billing/subscription` and `GET /v1/billing/budget` on `api.mistral.ai`, the endpoints Vibe Code reads. The budget needs the `see_org_inference_usage` permission: a key without it shows `Unsupported` in `/usage` with the reason and nothing in the footer.
 
 #### Claude (Claude Code)
 

@@ -40,6 +40,7 @@ OpenAI Codex
 | xAI Grok | Account → `xAI` | `1w` 和/或 `1m` | — | |
 | Kimi Coding | Account → `Kimi For Coding` | `5h`、`1w`、会员等级 | — | |
 | Antigravity | Account → `Antigravity` | Gemini（`5h`、`1w`）、Claude 与 GPT（`5h`、`1w`）、Gemini 4 Argon（`1w`）、套餐、邮箱、项目 | — | [`@specode/pi-antigravity`](https://github.com/specode/pi-antigravity) |
+| Mistral | Account → `Mistral` | `1m` 的 Vibe Code 与 API 额度（美元）、套餐、是否按量付费 | — | [`pi-mistral-subscription`](https://github.com/5omeOtherGuy/pi-mistral-subscription) |
 | Claude (Claude Code) | 无需在 Pi 登录，使用 Claude Code 的登录 | `5h`、`1w` | — | [`pi-claude-bridge`](https://www.npmjs.com/package/pi-claude-bridge) 0.9.3 及以上 |
 
 ### 提供商说明
@@ -65,6 +66,12 @@ npm 上有好几个名字相近的包。扩展按 `antigravity` 这个 provider 
 | `@gwylook/pi-antigravity`、`@dereknex/pi-antigravity`（`pi-antigravity` 的 fork）、`@heyhuynhgiabuu/pi-oauth-antigravity`、`@raquezha/antigravity`、`pi-provider-antigravity` | provider id、Google 接口地址和凭据格式都相同，预计可用，未测试 |
 | `@estebanforge/pi-antigravity-bridge`、`@thoth-agents/pi-antigravity-bridge` | 注册了 `antigravity`，但模型经由本地 Antigravity 桥（`agy-bridge://`）运行：不支持，底部状态栏为空，`/usage` 会说明原因 |
 | `@cortexkit/pi-antigravity-auth`（`google`）、`pi-antigravity-acp-provider` 与 `@dapidev/pi-antigravity-pure`（`antigravity-acp`）、`@ackneal/pi-agy-bridge`（`agy`） | 注册的是别的 provider id，不支持 |
+
+#### Mistral
+
+需要 [`pi-mistral-subscription`](https://github.com/5omeOtherGuy/pi-mistral-subscription)（[npm](https://www.npmjs.com/package/pi-mistral-subscription)）。用 `pi install npm:pi-mistral-subscription` 安装，之后 `/login` 的 `Sign in with an account` 列表里才会出现 `Mistral`。扩展识别 0.2.0 注册的 `mistral`，也识别更早版本使用的 `mistral-subscription`。
+
+Mistral 的套餐是一个按月计算的额度，由 Studio、API 和 Vibe Code 共用，不是按请求数计算的窗口，所以 `/usage` 在百分比旁边显示美元额度：Vibe Code 额度、API 额度、套餐，以及是否开启按量付费。底部状态栏显示 Vibe Code 额度，订阅登录产生的用量记在这里。数据来自 `api.mistral.ai` 上的 `GET /v1/billing/subscription` 和 `GET /v1/billing/budget`，也就是 Vibe Code 读取的两个接口。额度需要 `see_org_inference_usage` 权限：没有该权限的 key 在 `/usage` 里显示 `Unsupported` 并说明原因，底部状态栏不显示内容。
 
 #### Claude (Claude Code)
 
