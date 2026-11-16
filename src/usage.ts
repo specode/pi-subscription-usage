@@ -84,6 +84,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 	let sessionActive = false;
 	let displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE;
 	let showAllProviders = false;
+	let offerResetCredits = true;
 	let statusGeneration = 0;
 	let statusController: AbortController | undefined;
 	let statusTimer: ReturnType<typeof setTimeout> | undefined;
@@ -660,6 +661,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				publishStatus(ctx, current.outcome, current.model, sessionActive);
 			}
 			if (
+				!offerResetCredits ||
 				![CODEX_PROVIDER_ID, OPENAI_PROVIDER_ID].includes(ctx.model?.provider ?? "") ||
 				current.outcome.state.status !== "ready"
 			) {
@@ -706,6 +708,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		const config = loadUsageConfig(ctx.cwd, ctx.isProjectTrusted());
 		displayMode = config.displayMode;
 		showAllProviders = config.showAllProviders;
+		offerResetCredits = config.offerResetCredits;
 		for (const warning of config.warnings) {
 			ctx.ui.notify(`Usage config ignored: ${warning}`, "warning");
 		}

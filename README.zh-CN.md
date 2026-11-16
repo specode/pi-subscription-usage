@@ -121,33 +121,29 @@ OpenAI 或 Codex 账号里有可用的限额重置券时，`/usage` 会提供使
 - 提交兑换前，扩展会检查当前模型和账号是否发生变动，并核对运行时令牌是否与 Pi 保存的 OAuth 登录信息一致。
 - 在 OpenAI 模式下，重置券作用于服务端定义的账户级窗口，不一定单独清空当前应用的限额。
 - 兑换重置券是本扩展唯一的写操作。
+- 把 [`offerResetCredits`](#配置) 设为 `false` 可以关掉这个询问；账号上的重置券数量仍会显示。
 
 ## 配置
 
-百分比默认显示剩余额度。如需改为显示已用额度，可在 `~/.pi/agent/subscription-usage.json`（全局）或 `.pi/subscription-usage.json`（受信任项目的局部覆盖）中配置：
+配置文件为 `~/.pi/agent/subscription-usage.json`（全局）或 `.pi/subscription-usage.json`（受信任项目的局部覆盖），修改后执行 `/reload` 生效。
+
+| 配置项 | 取值 | 说明 |
+| --- | --- | --- |
+| `displayMode` | `"remaining"`（默认）或 `"used"` | 百分比显示剩余额度还是已用额度，作用于底部状态栏、`/usage` 进度条和状态事件 |
+| `showAllProviders` | `true` 或 `false`（默认） | `/usage` 列出所有已登录的提供商，而不只是当前提供商 |
+| `offerResetCredits` | `true`（默认）或 `false` | 当前 OpenAI 或 Codex 账号有重置券时，`/usage` 是否询问是否使用一张 |
 
 ```json
 {
-  "displayMode": "used"
+  "displayMode": "used",
+  "showAllProviders": true,
+  "offerResetCredits": false
 }
 ```
 
-| 配置值 | 说明 |
-| --- | --- |
-| `"remaining"` | 显示剩余额度百分比（默认） |
-| `"used"` | 显示已用额度百分比 |
+开启 `showAllProviders` 后，当前提供商排在最前并总是重新查询；其余提供商使用同样的五分钟缓存，Pi 没有其凭据的提供商会直接略过。Claude 在 Claude Code 于本次会话中上报用量之前显示为 `Waiting`。底部状态栏仍然只跟踪当前提供商。
 
-修改配置文件后执行 `/reload` 生效。`displayMode` 同时作用于底部状态栏、`/usage` 进度条和状态事件。
-
-`/usage` 默认只显示当前提供商。如需列出 Pi 中所有已登录的提供商，在同一文件里加上 `showAllProviders`：
-
-```json
-{
-  "showAllProviders": true
-}
-```
-
-当前提供商排在最前，并且总是重新查询；其余提供商使用同样的五分钟缓存，Pi 没有其凭据的提供商会直接略过。Claude 在 Claude Code 于本次会话中上报用量之前显示为 `Waiting`。底部状态栏仍然只跟踪当前提供商，重置券也仍然只对当前的 OpenAI 或 Codex 账号提供。
+`offerResetCredits` 设为 `false` 时，`/usage` 仍会显示账号上有几张重置券，但不再询问是否使用；需要使用重置券时把该配置改回 `true`。
 
 ## 隐私与安全
 

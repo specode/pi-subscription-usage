@@ -121,33 +121,29 @@ When your OpenAI or Codex account has redeemable rate-limit reset tickets, `/usa
 - Before redeeming, the extension checks that the active model and account have not changed and that the runtime token matches Pi's stored OAuth login.
 - In OpenAI mode, a ticket resets server-defined account windows rather than specifically clearing the current app's limits.
 - Redeeming a reset ticket is the only write operation in this extension.
+- Set [`offerResetCredits`](#configuration) to `false` to skip the offer; the account still lists how many tickets it has.
 
 ## Configuration
 
-Percentages show remaining quota by default. To show used quota instead, create `~/.pi/agent/subscription-usage.json` (global) or `.pi/subscription-usage.json` (trusted project override):
+Create `~/.pi/agent/subscription-usage.json` (global) or `.pi/subscription-usage.json` (trusted project override). Run `/reload` after changing it.
+
+| Key | Value | Description |
+| --- | --- | --- |
+| `displayMode` | `"remaining"` (default) or `"used"` | Whether percentages show remaining or used quota, in the footer, `/usage` progress bars and status events |
+| `showAllProviders` | `true` or `false` (default) | `/usage` lists every signed-in provider instead of the active one |
+| `offerResetCredits` | `true` (default) or `false` | Whether `/usage` offers to redeem a reset credit when the active OpenAI or Codex account has one |
 
 ```json
 {
-  "displayMode": "used"
+  "displayMode": "used",
+  "showAllProviders": true,
+  "offerResetCredits": false
 }
 ```
 
-| Value | Description |
-| --- | --- |
-| `"remaining"` | Show remaining quota percentage (default) |
-| `"used"` | Show used quota percentage |
+With `showAllProviders`, the active provider stays first and is always fetched fresh; the others read the same five-minute cache and are left out when Pi holds no credential for them. Claude appears as `Waiting` until Claude Code reports usage in the session. The footer keeps tracking the active provider.
 
-Run `/reload` after changing the config file. `displayMode` applies to the footer status bar, `/usage` progress bars, and status events.
-
-`/usage` reports the active provider only. To list every provider Pi is signed in to, add `showAllProviders` to the same file:
-
-```json
-{
-  "showAllProviders": true
-}
-```
-
-The active provider stays first and is always fetched fresh; the others read the same five-minute cache and are left out when Pi holds no credential for them. Claude appears as `Waiting` until Claude Code reports usage in the session. The footer keeps tracking the active provider, and reset credits are still offered for the active OpenAI or Codex account only.
+With `offerResetCredits` set to `false`, `/usage` still shows how many reset credits the account has, but never asks whether to redeem one; redeeming then needs the setting turned back on.
 
 ## Privacy and Safety
 

@@ -9,6 +9,7 @@ import {
 test("uses remaining as the default display mode", () => {
 	assert.equal(DEFAULT_USAGE_CONFIG.displayMode, "remaining");
 	assert.equal(DEFAULT_USAGE_CONFIG.showAllProviders, false);
+	assert.equal(DEFAULT_USAGE_CONFIG.offerResetCredits, true);
 	assert.deepEqual(parseUsageConfig({}), {});
 });
 
@@ -18,11 +19,11 @@ test("lets project configuration override global display mode", () => {
 			parseUsageConfig({ displayMode: "used" }),
 			parseUsageConfig({ displayMode: "remaining" }),
 		),
-		{ displayMode: "remaining", showAllProviders: false },
+		{ displayMode: "remaining", showAllProviders: false, offerResetCredits: true },
 	);
 	assert.deepEqual(
 		resolveUsageConfig(parseUsageConfig({ displayMode: "used" })),
-		{ displayMode: "used", showAllProviders: false },
+		{ displayMode: "used", showAllProviders: false, offerResetCredits: true },
 	);
 });
 
@@ -63,5 +64,25 @@ test("rejects invalid usage configuration", () => {
 	assert.match(
 		parseUsageConfig({ showAllProviders: "yes" }).warning ?? "",
 		/showAllProviders must be true or false/u,
+	);
+	assert.match(
+		parseUsageConfig({ offerResetCredits: "no" }).warning ?? "",
+		/offerResetCredits must be true or false/u,
+	);
+});
+
+test("offers reset credits unless offerResetCredits is off", () => {
+	assert.equal(resolveUsageConfig().offerResetCredits, true);
+	assert.equal(
+		resolveUsageConfig(parseUsageConfig({ offerResetCredits: false }))
+			.offerResetCredits,
+		false,
+	);
+	assert.equal(
+		resolveUsageConfig(
+			parseUsageConfig({ offerResetCredits: false }),
+			parseUsageConfig({ offerResetCredits: true }),
+		).offerResetCredits,
+		true,
 	);
 });
