@@ -110,7 +110,7 @@ pi install /path/to/pi-subscription-usage
 按上面的方法登录，再选一个该提供商的模型，之后：
 
 - 底部状态栏会自动显示当前额度窗口，在每轮对话结束后及每 5 分钟刷新一次（带 5 分钟缓存）。
-- 执行 `/usage` 会跳过缓存直接拉取最新数据，显示进度条、重置时间（`MM/DD HH:mm`）及账号信息。
+- 执行 `/usage` 会跳过缓存直接拉取最新数据，显示进度条、重置时间（`MM/DD HH:mm`）及账号信息。开启 [`showAllProviders`](#配置) 后，还会一并列出其他已登录的提供商。
 - Claude 例外：不会主动查询额度，只读取 Claude Code 回复中附带的数据（见 [Claude (Claude Code)](#claude-claude-code)）。
 
 ### 使用重置券（OpenAI 与 Codex）
@@ -138,6 +138,16 @@ OpenAI 或 Codex 账号里有可用的限额重置券时，`/usage` 会提供使
 | `"used"` | 显示已用额度百分比 |
 
 修改配置文件后执行 `/reload` 生效。`displayMode` 同时作用于底部状态栏、`/usage` 进度条和状态事件。
+
+`/usage` 默认只显示当前提供商。如需列出 Pi 中所有已登录的提供商，在同一文件里加上 `showAllProviders`：
+
+```json
+{
+  "showAllProviders": true
+}
+```
+
+当前提供商排在最前，并且总是重新查询；其余提供商使用同样的五分钟缓存，Pi 没有其凭据的提供商会直接略过。Claude 在 Claude Code 于本次会话中上报用量之前显示为 `Waiting`。底部状态栏仍然只跟踪当前提供商，重置券也仍然只对当前的 OpenAI 或 Codex 账号提供。
 
 ## 隐私与安全
 

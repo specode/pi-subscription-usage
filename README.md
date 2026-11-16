@@ -110,7 +110,7 @@ pi install /path/to/pi-subscription-usage
 Sign in through `/login` as described above, then select a model from that provider. From then on:
 
 - The footer status bar shows the active quota windows and refreshes after each turn and every 5 minutes (using a 5-minute cache).
-- Running `/usage` always fetches fresh data for the active provider and shows progress bars, reset times (`MM/DD HH:mm`), and account details.
+- Running `/usage` always fetches fresh data for the active provider and shows progress bars, reset times (`MM/DD HH:mm`), and account details. With [`showAllProviders`](#configuration) it also lists the other signed-in providers.
 - Claude is the exception: its quota is never fetched, only read from Claude Code's responses (see [Claude (Claude Code)](#claude-claude-code)).
 
 ### Reset Credits (OpenAI and Codex)
@@ -138,6 +138,16 @@ Percentages show remaining quota by default. To show used quota instead, create 
 | `"used"` | Show used quota percentage |
 
 Run `/reload` after changing the config file. `displayMode` applies to the footer status bar, `/usage` progress bars, and status events.
+
+`/usage` reports the active provider only. To list every provider Pi is signed in to, add `showAllProviders` to the same file:
+
+```json
+{
+  "showAllProviders": true
+}
+```
+
+The active provider stays first and is always fetched fresh; the others read the same five-minute cache and are left out when Pi holds no credential for them. Claude appears as `Waiting` until Claude Code reports usage in the session. The footer keeps tracking the active provider, and reset credits are still offered for the active OpenAI or Codex account only.
 
 ## Privacy and Safety
 

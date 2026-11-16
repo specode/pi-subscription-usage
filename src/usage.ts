@@ -48,6 +48,7 @@ import {
 	adapterForProvider,
 	queryProviderUsage,
 	resolveUsageAuth,
+	SUPPORTED_ADAPTERS,
 	UsageUnsupportedError,
 } from "./query.ts";
 import type {
@@ -82,6 +83,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 	const activeControllers = new Set<AbortController>();
 	let sessionActive = false;
 	let displayMode: UsageDisplayMode = DEFAULT_USAGE_DISPLAY_MODE;
+	let showAllProviders = false;
 	let statusGeneration = 0;
 	let statusController: AbortController | undefined;
 	let statusTimer: ReturnType<typeof setTimeout> | undefined;
@@ -182,12 +184,13 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		if (schedule && sessionActive) scheduleStatusRefresh(ctx, model);
 	}
 
+	/** Undefined means Pi holds no credential for the provider, so it is not signed in. */
 	async function queryAdapterState(
 		ctx: ExtensionContext,
 		adapter: UsageProviderAdapter,
 		force: boolean,
 		signal: AbortSignal,
-	): Promise<QueryOutcome> {
+	): Promise<QueryOutcome | undefined> {
 		let auth: ResolvedUsageAuth | undefined;
 		try {
 			auth = await awaitWithDeadline(
@@ -209,16 +212,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				},
 			};
 		}
-		if (!auth) {
-			return {
-				state: {
-					providerId: adapter.id,
-					providerName: adapter.displayName,
-					status: "auth-unavailable",
-					message: `No Pi runtime credential available for ${adapter.displayName}.`,
-				},
-			};
-		}
+		if (!auth) return undefined;
 		const cached = force ? undefined : cache.get(adapter.id, auth.fingerprint);
 		if (cached) {
 			return {
@@ -305,7 +299,16 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				},
 			};
 		}
-		return queryAdapterState(ctx, adapter, force, signal);
+		return (
+			(await queryAdapterState(ctx, adapter, force, signal)) ?? {
+				state: {
+					providerId: adapter.id,
+					providerName: adapter.displayName,
+					status: "auth-unavailable",
+					message: `No Pi runtime credential available for ${adapter.displayName}.`,
+				},
+			}
+		);
 	}
 
 	/** Claude has no query to force; /usage and refreshes reread the last observation. */
@@ -578,6 +581,52 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		return undefined;
 	}
 
+	/**
+	 * The other signed-in providers for `/usage`. Only the active provider is
+	 * forced; these read the five-minute cache so a list costs few requests.
+	 */
+	async function collectOtherProviders(
+		ctx: ExtensionContext,
+		active: ProviderUsageState,
+		signal: AbortSignal,
+	): Promise<ProviderUsageState[]> {
+		const states = await Promise.all(
+			SUPPORTED_ADAPTERS.filter(
+				(adapter) => adapter.id !== active.providerId,
+			).map(async (adapter) => {
+				try {
+					return (await queryAdapterState(ctx, adapter, false, signal))?.state;
+				} catch (error) {
+					if (isAbortError(error) || !sessionActive) throw error;
+					return {
+						providerId: adapter.id,
+						providerName: adapter.displayName,
+						status: "query-failed",
+						message: errorMessage(error),
+					} satisfies ProviderUsageState;
+				}
+			}),
+		);
+		const others = states.filter(
+			(state): state is ProviderUsageState => state !== undefined,
+		);
+		if (
+			active.providerId !== CLAUDE_BRIDGE_PROVIDER_ID &&
+			hasClaudeBridgeModels(ctx)
+		) {
+			others.push(observedClaudeOutcome().state);
+		}
+		return others;
+	}
+
+	/** Claude has no endpoint to query, so it appears only when the bridge is installed. */
+	function hasClaudeBridgeModels(ctx: ExtensionContext): boolean {
+		return [
+			...ctx.modelRegistry.getAvailable(),
+			...ctx.modelRegistry.getAll(),
+		].some((model) => model.provider === CLAUDE_BRIDGE_PROVIDER_ID);
+	}
+
 	async function showUsage(ctx: ExtensionCommandContext): Promise<void> {
 		if (!ctx.hasUI) throw new Error("/usage requires TUI or RPC mode.");
 		const controller = new AbortController();
@@ -591,8 +640,20 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 				);
 				return;
 			}
+			const states = [current.outcome.state];
+			if (showAllProviders) {
+				states.push(
+					...(await collectOtherProviders(
+						ctx,
+						current.outcome.state,
+						controller.signal,
+					)),
+				);
+			}
 			ctx.ui.notify(
-				formatProviderState(current.outcome.state, displayMode),
+				states
+					.map((state) => formatProviderState(state, displayMode))
+					.join("\n\n"),
 				"info",
 			);
 			if (current.model) {
@@ -644,6 +705,7 @@ export default function subscriptionUsage(pi: ExtensionAPI): void {
 		sessionActive = ctx.hasUI;
 		const config = loadUsageConfig(ctx.cwd, ctx.isProjectTrusted());
 		displayMode = config.displayMode;
+		showAllProviders = config.showAllProviders;
 		for (const warning of config.warnings) {
 			ctx.ui.notify(`Usage config ignored: ${warning}`, "warning");
 		}

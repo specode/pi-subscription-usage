@@ -8,6 +8,7 @@ import {
 
 test("uses remaining as the default display mode", () => {
 	assert.equal(DEFAULT_USAGE_CONFIG.displayMode, "remaining");
+	assert.equal(DEFAULT_USAGE_CONFIG.showAllProviders, false);
 	assert.deepEqual(parseUsageConfig({}), {});
 });
 
@@ -17,11 +18,11 @@ test("lets project configuration override global display mode", () => {
 			parseUsageConfig({ displayMode: "used" }),
 			parseUsageConfig({ displayMode: "remaining" }),
 		),
-		{ displayMode: "remaining" },
+		{ displayMode: "remaining", showAllProviders: false },
 	);
 	assert.deepEqual(
 		resolveUsageConfig(parseUsageConfig({ displayMode: "used" })),
-		{ displayMode: "used" },
+		{ displayMode: "used", showAllProviders: false },
 	);
 });
 
@@ -34,10 +35,33 @@ test("accepts remaining and used display modes", () => {
 	});
 });
 
+test("shows only the active provider unless showAllProviders is on", () => {
+	assert.equal(resolveUsageConfig().showAllProviders, false);
+	assert.equal(
+		resolveUsageConfig(parseUsageConfig({ showAllProviders: true }))
+			.showAllProviders,
+		true,
+	);
+	assert.equal(
+		resolveUsageConfig(
+			parseUsageConfig({ showAllProviders: true }),
+			parseUsageConfig({ showAllProviders: false }),
+		).showAllProviders,
+		false,
+	);
+	assert.deepEqual(parseUsageConfig({ showAllProviders: true }), {
+		showAllProviders: true,
+	});
+});
+
 test("rejects invalid usage configuration", () => {
 	assert.match(parseUsageConfig([]).warning ?? "", /JSON object/u);
 	assert.match(
 		parseUsageConfig({ displayMode: "total" }).warning ?? "",
 		/displayMode/u,
+	);
+	assert.match(
+		parseUsageConfig({ showAllProviders: "yes" }).warning ?? "",
+		/showAllProviders must be true or false/u,
 	);
 });
